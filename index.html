@@ -333,7 +333,6 @@
   }
   .close-btn:hover { background: #3a30a0; }
 
-
   /* ── 頁籤導航 ── */
   .tab-nav {
     display: flex;
@@ -547,8 +546,11 @@
   const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbwkuEQxBGa0erDZssKU8c3blvtPdekTz3h4Ong-XFBWfyajvQ6_CgO7-ImQJKymBg84mg/exec";
   // ▲▲▲ 只需要改這一行 ▲▲▲
 
-  let currentUser = null; // { name, dept } 或 null（共用密碼）
+  let currentUser = null;
   let sheetData   = { people: [], materials: [] };
+
+  // ★ 新增：記住最後選擇的姓名（切換頁籤前先存）
+  let _lastSelectedName = '';
 
   // ── JSONP 工具 ─────────────────────────────────────────────────
   function jsonpCall(url, callback) {
@@ -609,14 +611,11 @@
         return;
       }
 
-      // 登入成功
       if (res.isShared) {
-        // 共用密碼：需自選姓名
         currentUser = null;
         sheetData.people    = res.people    || [];
         sheetData.materials = res.materials || [];
       } else {
-        // 個人密碼：自動帶入姓名部門
         currentUser = { name: res.name, dept: res.dept };
         sheetData.materials = res.materials || [];
       }
@@ -629,7 +628,6 @@
   function enterForm() {
     document.getElementById('loginScreen').classList.add('hidden');
     document.getElementById('mainPage').style.display = 'block';
-    // 確保預設顯示申請表單頁籤
     document.getElementById('mainForm').style.display  = '';
     document.getElementById('historyPage').style.display = 'none';
     document.getElementById('tabApply').classList.add('active');
@@ -640,13 +638,13 @@
     document.getElementById('applyDate').value = today();
 
     if (currentUser) {
-      // 個人密碼：姓名唯讀
       const nameEl = document.getElementById('name');
       nameEl.innerHTML = '<option value="' + currentUser.name + '">' + currentUser.name + '</option>';
       nameEl.disabled  = true;
       document.getElementById('dept').value = currentUser.dept || '';
+      // ★ 個人登入時直接記住姓名
+      _lastSelectedName = currentUser.name;
     } else {
-      // 共用密碼：顯示姓名下拉
       buildNameSelect();
     }
   }
@@ -668,9 +666,8 @@
     const sel = document.getElementById('name');
     const opt = sel.options[sel.selectedIndex];
     document.getElementById('dept').value = opt ? (opt.dataset.dept || '') : '';
-    // 姓名變更時重置歷史記錄快取
-    historyLoaded = false;
-    historyName   = '';
+    // ★ 每次選姓名都更新快取
+    _lastSelectedName = sel.value;
   }
 
   // ── 材料選項 ──────────────────────────────────────────────────
@@ -797,8 +794,10 @@
 
     if (currentUser) {
       document.getElementById('dept').value = currentUser.dept || '';
+      _lastSelectedName = currentUser.name;
     } else {
       document.getElementById('dept').value = '';
+      _lastSelectedName = '';
       buildNameSelect();
     }
 
@@ -807,7 +806,7 @@
     document.getElementById('applyDate').value = today();
   }
 
-  // ── 頁籤切換 ──────────────────────────────────────────────────
+  // ── 頁籤切換（★ 修正：切換前先存好姓名）────────────────────────
   function switchTab(tab) {
     const applyForm  = document.getElementById('mainForm');
     const historyDiv = document.getElementById('historyPage');
@@ -820,35 +819,34 @@
       tabApply.classList.add('active');
       tabHistory.classList.remove('active');
     } else {
+      // ★ 在表單還可見時先抓姓名，避免隱藏後抓不到
+      const nameVal = document.getElementById('name').value.trim();
+      if (nameVal) _lastSelectedName = nameVal;
+
       applyForm.style.display  = 'none';
-      historyDiv.style.display = '';
+      historyDiv.style.display = 'block';
       tabApply.classList.remove('active');
       tabHistory.classList.add('active');
       loadHistory();
     }
   }
 
-  // ── 載入歷史記錄 ──────────────────────────────────────────────
-  let historyLoaded = false;
-  let historyName   = '';
-
+  // ── 載入歷史記錄（★ 修正：優先用快取的姓名）─────────────────────
   function loadHistory() {
-    const name = currentUser ? currentUser.name : document.getElementById('name').value.trim();
+    // 個人登入 → currentUser.name；共用登入 → _lastSelectedName
+    const name = currentUser ? currentUser.name : _lastSelectedName;
+
     if (!name) {
       document.getElementById('historyContent').innerHTML =
-        '<div class="history-empty">請先選擇姓名</div>';
+        '<div class="history-empty">請先在申請表單選擇姓名，再查看歷史記錄</div>';
       return;
     }
-    // 如果姓名沒變就不重新載入
-    if (historyLoaded && historyName === name) return;
 
     document.getElementById('historyContent').innerHTML =
       '<div class="history-loading">載入中…</div>';
 
     const url = WEB_APP_URL + '?action=getHistory&name=' + encodeURIComponent(name);
     jsonpCall(url, function(res) {
-      historyLoaded = true;
-      historyName   = name;
       if (!res || !res.records) {
         document.getElementById('historyContent').innerHTML =
           '<div class="history-empty">載入失敗，請稍後再試</div>';
@@ -875,7 +873,6 @@
       html += '<tr>';
       headers.forEach(function(h) {
         let val = row[h] || '';
-        // 處理狀態加顏色標籤
         if (h === '處理狀態') {
           if (val === '待處理') val = '<span class="badge-pending">待處理</span>';
           else if (val === '已發放') val = '<span class="badge-done">已發放</span>';
