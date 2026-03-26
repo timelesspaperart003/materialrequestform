@@ -1,450 +1,896 @@
-// ================================================================
-//  紙川有限公司 — 材料倉儲管理系統
-//  Google Apps Script
-// ================================================================
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>材料申請單</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;600&family=DM+Serif+Display&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-const SHEET_ID = "";
-
-const CONFIG = {
-  申請記錄頁名稱:  "申請記錄",
-  庫存總表頁名稱:  "庫存總表",
-  人員清單頁名稱:  "人員清單",
-  材料清單頁名稱:  "材料清單",
-  負責人清單頁名稱: "負責人清單",
-  主題色: "#4A3FA0",
-  副色:   "#EDE9FF",
-  警示色: "#C0392B",
-  正常色: "#1A7A4A",
-};
-
-const SHARED_PASSWORD = "timeless"; // 共用密碼（存在 Apps Script，不外洩）
-
-// E欄（期望取貨日期）已移除
-const RECORD_COLUMNS = [
-  { key: "申請單號",       width: 160 },  // A
-  { key: "申請人姓名",     width: 110 },  // B
-  { key: "部門",           width: 100 },  // C
-  { key: "申請日期",       width: 110 },  // D
-  { key: "材料名稱",       width: 130 },  // E
-  { key: "規格",           width: 110 },  // F
-  { key: "申請數量",       width: 90  },  // G
-  { key: "緊急程度",       width: 90  },  // H
-  { key: "用途說明",       width: 160 },  // I
-  { key: "備注",           width: 140 },  // J
-  { key: "處理狀態",       width: 100 },  // K
-  { key: "實際發放日期",   width: 120 },  // L  下拉：通過/駁回
-  { key: "處理日期",       width: 110 },  // M  日期選擇器
-  { key: "已簽收確認",     width: 100 },  // N  核取方塊
-  { key: "負責人",         width: 120 },  // O  下拉：從負責人清單讀取
-  { key: "備注（負責人）", width: 150 },  // P
-];
-
-const STOCK_COLUMNS = [
-  { key: "材料名稱",     width: 140 },  // A
-  { key: "規格",         width: 120 },  // B
-  { key: "單位",         width: 80  },  // C
-  { key: "現有數量",     width: 100 },  // D  手動填
-  { key: "安全庫存量",   width: 110 },  // E  從材料清單帶入
-  { key: "庫存狀態",     width: 110 },  // F  公式自動判斷
-  { key: "上次補貨日期", width: 120 },  // G
-  { key: "備注",         width: 160 },  // H
-];
-
-// 初始庫存資料由材料清單自動帶入
-const INITIAL_STOCK = [];
-
-
-// =================================================================
-//  setupSheet
-// =================================================================
-function setupSheet() {
-  const ss = SHEET_ID
-    ? SpreadsheetApp.openById(SHEET_ID)
-    : SpreadsheetApp.getActiveSpreadsheet();
-  setupRecordSheet(ss);
-  setupStockSheet(ss);
-  SpreadsheetApp.getUi().alert("設定完成！");
-}
-
-
-// =================================================================
-//  建立申請記錄頁
-// =================================================================
-function setupRecordSheet(ss) {
-  let sheet = ss.getSheetByName(CONFIG.申請記錄頁名稱);
-  if (sheet) {
-    sheet.clear();
-  } else {
-    sheet = ss.insertSheet(CONFIG.申請記錄頁名稱, 0);
-  }
-  sheet.setFrozenRows(1);
-
-  const headers = RECORD_COLUMNS.map(c => c.key);
-  const headerRange = sheet.getRange(1, 1, 1, headers.length);
-  headerRange.setValues([headers]);
-  headerRange
-    .setBackground(CONFIG.主題色).setFontColor("#FFFFFF")
-    .setFontWeight("bold").setFontSize(11)
-    .setHorizontalAlignment("center").setVerticalAlignment("middle");
-  sheet.setRowHeight(1, 36);
-  RECORD_COLUMNS.forEach((col, i) => sheet.setColumnWidth(i + 1, col.width));
-
-  sheet.getRange(2, 1, 200, RECORD_COLUMNS.length)
-    .setFontSize(11).setVerticalAlignment("middle").setWrap(true);
-
-  // 核取方塊（已簽收確認）
-  const checkCol = RECORD_COLUMNS.findIndex(c => c.key === "已簽收確認") + 1;
-  sheet.getRange(2, checkCol, 200, 1).insertCheckboxes().setHorizontalAlignment("center");
-
-  // 處理狀態下拉
-  const statusCol = RECORD_COLUMNS.findIndex(c => c.key === "處理狀態") + 1;
-  sheet.getRange(2, statusCol, 200, 1).setDataValidation(
-    SpreadsheetApp.newDataValidation()
-      .requireValueInList(["待處理", "已聯繫", "已發放"], true)
-      .setAllowInvalid(false).build()
-  );
-
-  // 緊急程度下拉
-  const urgencyCol = RECORD_COLUMNS.findIndex(c => c.key === "緊急程度") + 1;
-  sheet.getRange(2, urgencyCol, 200, 1).setDataValidation(
-    SpreadsheetApp.newDataValidation()
-      .requireValueInList(["一般", "稍急", "緊急"], true)
-      .setAllowInvalid(false).build()
-  );
-
-  // 實際發放日期 → 下拉：通過/駁回
-  const releaseDateCol = RECORD_COLUMNS.findIndex(c => c.key === "實際發放日期") + 1;
-  sheet.getRange(2, releaseDateCol, 200, 1).setDataValidation(
-    SpreadsheetApp.newDataValidation()
-      .requireValueInList(["通過", "駁回"], true)
-      .setAllowInvalid(false).build()
-  );
-
-  // 處理日期 → 日期選擇器
-  const procesDateCol = RECORD_COLUMNS.findIndex(c => c.key === "處理日期") + 1;
-  sheet.getRange(2, procesDateCol, 200, 1).setDataValidation(
-    SpreadsheetApp.newDataValidation().requireDate().setAllowInvalid(true).build()
-  ).setNumberFormat("yyyy/mm/dd");
-
-  // 負責人下拉（從負責人清單讀取）
-  const managerCol  = RECORD_COLUMNS.findIndex(c => c.key === "負責人") + 1;
-  const managerList = getManagerList(ss);
-  if (managerList.length > 0) {
-    sheet.getRange(2, managerCol, 200, 1).setDataValidation(
-      SpreadsheetApp.newDataValidation()
-        .requireValueInList(managerList, true)
-        .setAllowInvalid(false).build()
-    );
+  :root {
+    --ink: #1a1a2e;
+    --ink-muted: #5a5a7a;
+    --ink-light: #9898b2;
+    --surface: #ffffff;
+    --surface-2: #f5f5fa;
+    --surface-3: #ededf5;
+    --accent: #4a3fa0;
+    --accent-light: #ece9ff;
+    --accent-mid: #7068c4;
+    --border: #d8d8e8;
+    --danger: #c0392b;
+    --radius: 10px;
   }
 
-  applyAlternatingColors(sheet, 2, 200, RECORD_COLUMNS.length);
-  Logger.log("申請記錄頁設定完成");
-}
-
-
-// =================================================================
-//  從負責人清單讀取名單
-// =================================================================
-function getManagerList(ss) {
-  const sheet = ss.getSheetByName(CONFIG.負責人清單頁名稱);
-  if (!sheet) return [];
-  const data = sheet.getDataRange().getValues();
-  const list = [];
-  for (let i = 1; i < data.length; i++) {
-    const name = String(data[i][0] || '').trim();
-    if (name) list.push(name);
-  }
-  return list;
-}
-
-
-// =================================================================
-//  建立庫存總表頁
-//  A=材料清單A(材料) B=材料清單B(規格) C=材料清單C(單位)
-//  D=現有數量(手動) E=材料清單D(安全庫存量) F=庫存狀態(公式)
-// =================================================================
-function setupStockSheet(ss) {
-  let sheet = ss.getSheetByName(CONFIG.庫存總表頁名稱);
-  if (sheet) { sheet.clear(); } else { sheet = ss.insertSheet(CONFIG.庫存總表頁名稱, 1); }
-  sheet.setFrozenRows(1);
-
-  const headers = STOCK_COLUMNS.map(c => c.key);
-  const headerRange = sheet.getRange(1, 1, 1, headers.length);
-  headerRange.setValues([headers]);
-  headerRange
-    .setBackground(CONFIG.主題色).setFontColor("#FFFFFF")
-    .setFontWeight("bold").setFontSize(11)
-    .setHorizontalAlignment("center").setVerticalAlignment("middle");
-  sheet.setRowHeight(1, 36);
-  STOCK_COLUMNS.forEach((col, i) => sheet.setColumnWidth(i + 1, col.width));
-
-  // 從材料清單讀取資料
-  const matSheet = ss.getSheetByName(CONFIG.材料清單頁名稱);
-  if (matSheet) {
-    const matData = matSheet.getDataRange().getValues();
-    for (let i = 1; i < matData.length; i++) {
-      const matName = String(matData[i][0] || '').trim();
-      const matSpec = String(matData[i][1] || '').trim();
-      const matUnit = String(matData[i][2] || '').trim();
-      const matSafe = matData[i][3] !== '' ? matData[i][3] : '';
-      if (!matName) continue;
-      sheet.getRange(i + 1, 1).setValue(matName);
-      sheet.getRange(i + 1, 2).setValue(matSpec);
-      sheet.getRange(i + 1, 3).setValue(matUnit);
-      sheet.getRange(i + 1, 4).setValue('');
-      sheet.getRange(i + 1, 5).setValue(matSafe);
-    }
+  body {
+    font-family: 'Noto Sans TC', sans-serif;
+    background: #eeeef8;
+    min-height: 100vh;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    padding: 40px 16px 60px;
+    color: var(--ink);
   }
 
-  // 庫存狀態公式（F欄）固定寫入200列
-  const statusCol  = STOCK_COLUMNS.findIndex(c => c.key === "庫存狀態") + 1;
-  const qtyLetter  = columnLetter(4); // D
-  const safeLetter = columnLetter(5); // E
-  for (let r = 2; r <= 200; r++) {
-    sheet.getRange(r, statusCol).setFormula(
-      `=IF(${qtyLetter}${r}="";"";IF(${qtyLetter}${r}<=${safeLetter}${r};"需補貨";"正常"))`
-    );
+  .page { width: 100%; max-width: 720px; }
+
+  .header { text-align: center; margin-bottom: 32px; padding-top: 8px; }
+  .header .badge {
+    display: inline-block;
+    background: var(--accent);
+    color: #fff;
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    font-weight: 600;
+    padding: 4px 14px;
+    border-radius: 20px;
+    margin-bottom: 14px;
+    text-transform: uppercase;
+  }
+  .header h1 {
+    font-family: 'DM Serif Display', serif;
+    font-size: 36px;
+    color: var(--ink);
+    line-height: 1.15;
+    margin-bottom: 8px;
+  }
+  .header p { color: var(--ink-muted); font-size: 14px; line-height: 1.6; }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 32px;
+    margin-bottom: 20px;
   }
 
-  // 條件式格式：需補貨 → 紅色；正常 → 預設黑色
-  const dataRange = sheet.getRange(2, 1, 200, STOCK_COLUMNS.length);
-  sheet.setConditionalFormatRules([
-    SpreadsheetApp.newConditionalFormatRule()
-      .whenFormulaSatisfied(`=$${columnLetter(statusCol)}2="需補貨"`)
-      .setBackground("#FDECEA").setFontColor(CONFIG.警示色).setRanges([dataRange]).build(),
-  ]);
-
-  applyAlternatingColors(sheet, 2, 200, STOCK_COLUMNS.length);
-  sheet.getRange(2, 1, 200, STOCK_COLUMNS.length).setFontSize(11).setVerticalAlignment("middle");
-  Logger.log("庫存總表頁設定完成");
-}
-
-
-// =================================================================
-//  POST：接收表單送出
-// =================================================================
-function doPost(e) {
-  try {
-    const data = JSON.parse(e.postData.contents);
-    appendRecord(data);
-    return ContentService
-      .createTextOutput(JSON.stringify({ status: "ok", ref: data.ref }))
-      .setMimeType(ContentService.MimeType.JSON);
-  } catch (err) {
-    return ContentService
-      .createTextOutput(JSON.stringify({ status: "error", message: err.message }))
-      .setMimeType(ContentService.MimeType.JSON);
+  .section-title {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--accent);
+    margin-bottom: 20px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
   }
-}
+  .section-title::after { content: ''; flex: 1; height: 1px; background: var(--surface-3); }
 
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+  .col-full { grid-column: 1 / -1; }
+  .field { display: flex; flex-direction: column; gap: 6px; }
 
-// =================================================================
-//  GET：支援三種 action
-//  1. action=login&pwd=xxx          → 驗證密碼，回傳使用者資料+材料清單
-//  2. action=getMaterials            → 只回傳材料清單
-//  3. action=getHistory&name=xxx    → 回傳該人員的申請記錄
-// =================================================================
-function doGet(e) {
-  const action   = e && e.parameter ? e.parameter.action   : '';
-  const callback = e && e.parameter ? e.parameter.callback : '';
+  label { font-size: 13px; font-weight: 500; color: var(--ink-muted); }
+  label .req { color: var(--accent-mid); margin-left: 3px; }
 
-  let json = '';
-
-  if (action === 'login') {
-    const pwd = e.parameter.pwd || '';
-    json = verifyPassword(pwd);
-  } else if (action === 'getMaterials') {
-    json = getMaterialsJSON();
-  } else if (action === 'getHistory') {
-    const name = e.parameter.name || '';
-    json = getHistoryJSON(name);
-  } else {
-    json = JSON.stringify({ status: "ready" });
+  input[type="text"],
+  input[type="date"],
+  input[type="number"],
+  input[type="password"],
+  select,
+  textarea {
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 10px 14px;
+    font-family: 'Noto Sans TC', sans-serif;
+    font-size: 14px;
+    color: var(--ink);
+    background: var(--surface);
+    outline: none;
+    transition: border-color 0.15s, box-shadow 0.15s;
+    width: 100%;
+    -webkit-appearance: none;
+  }
+  input:focus, select:focus, textarea:focus {
+    border-color: var(--accent-mid);
+    box-shadow: 0 0 0 3px var(--accent-light);
+  }
+  input:disabled, select:disabled {
+    background: var(--surface-2);
+    color: var(--ink-muted);
+    cursor: not-allowed;
+  }
+  textarea { resize: vertical; min-height: 90px; line-height: 1.6; }
+  select {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' fill='none'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%239898b2' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 14px center;
+    padding-right: 38px;
+    cursor: pointer;
   }
 
-  if (callback) {
-    return ContentService
-      .createTextOutput(callback + '(' + json + ')')
-      .setMimeType(ContentService.MimeType.JAVASCRIPT);
+  /* ── 密碼畫面 ── */
+  #loginScreen {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    width: 100%;
+    position: fixed;
+    inset: 0;
+    background: #eeeef8;
+    z-index: 9999;
+    padding: 20px;
   }
-  return ContentService
-    .createTextOutput(json)
-    .setMimeType(ContentService.MimeType.JSON);
-}
+  #loginScreen.hidden { display: none; }
 
+  .login-box {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 40px 36px;
+    max-width: 400px;
+    width: 100%;
+    text-align: center;
+  }
+  .login-box .lock-icon { font-size: 36px; margin-bottom: 16px; }
+  .login-box h2 {
+    font-family: 'DM Serif Display', serif;
+    font-size: 26px;
+    color: var(--ink);
+    margin-bottom: 6px;
+  }
+  .login-box p { font-size: 13px; color: var(--ink-muted); margin-bottom: 24px; line-height: 1.6; }
+  .login-field { text-align: left; margin-bottom: 16px; }
+  .login-field label { display: block; margin-bottom: 6px; }
+  .login-btn {
+    width: 100%;
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: var(--radius);
+    font-family: 'Noto Sans TC', sans-serif;
+    font-size: 15px;
+    font-weight: 600;
+    padding: 12px 24px;
+    cursor: pointer;
+    transition: all 0.2s;
+    margin-top: 4px;
+  }
+  .login-btn:hover { background: #3a30a0; }
+  .login-btn:disabled { background: var(--ink-light); cursor: not-allowed; }
+  .login-error { font-size: 13px; color: var(--danger); margin-top: 12px; min-height: 20px; }
 
-// =================================================================
-//  驗證密碼
-//  成功回傳：{ ok: true, name, dept, isShared, materials: [...] }
-//  失敗回傳：{ ok: false }
-// =================================================================
-function verifyPassword(pwd) {
-  if (!pwd) return JSON.stringify({ ok: false });
+  /* ── Loading ── */
+  .loading-bar {
+    background: var(--accent-light);
+    border: 1px solid #c8c3f5;
+    border-radius: var(--radius);
+    padding: 10px 16px;
+    font-size: 13px;
+    color: var(--accent);
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    margin-bottom: 20px;
+  }
+  .loading-bar.hidden { display: none; }
+  .spinner {
+    width: 14px; height: 14px;
+    border: 2px solid var(--accent-light);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+    flex-shrink: 0;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
 
-  const ss = SHEET_ID
-    ? SpreadsheetApp.openById(SHEET_ID)
-    : SpreadsheetApp.getActiveSpreadsheet();
+  /* ── 材料列 ── */
+  .items-header {
+    display: grid;
+    grid-template-columns: 2fr 1.2fr 1fr 36px;
+    gap: 10px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--ink-light);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    padding: 0 4px 8px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 10px;
+  }
+  .item-row {
+    display: grid;
+    grid-template-columns: 2fr 1.2fr 1fr 36px;
+    gap: 10px;
+    align-items: start;
+    margin-bottom: 10px;
+    animation: fadeSlide 0.2s ease;
+  }
+  @keyframes fadeSlide {
+    from { opacity: 0; transform: translateY(-6px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  .remove-btn {
+    width: 32px; height: 32px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface);
+    color: var(--ink-light);
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 16px;
+    transition: all 0.15s;
+    flex-shrink: 0;
+    margin-top: 2px;
+  }
+  .remove-btn:hover { background: #fff0ee; border-color: #f5c0b8; color: var(--danger); }
+  .add-row-btn {
+    display: flex; align-items: center; gap: 6px;
+    border: 1.5px dashed var(--border);
+    border-radius: var(--radius);
+    background: none;
+    color: var(--ink-muted);
+    font-size: 13px;
+    font-family: 'Noto Sans TC', sans-serif;
+    font-weight: 500;
+    cursor: pointer;
+    padding: 9px 14px;
+    width: 100%;
+    transition: all 0.15s;
+    margin-top: 6px;
+  }
+  .add-row-btn:hover { border-color: var(--accent-mid); color: var(--accent); background: var(--accent-light); }
+  .add-row-btn .icon { font-size: 18px; line-height: 1; }
+  .custom-material-input { margin-top: 6px; animation: fadeSlide 0.2s ease; }
+  .custom-material-input.hidden { display: none; }
 
-  // 先比對個人密碼
-  const peopleSheet = ss.getSheetByName(CONFIG.人員清單頁名稱);
-  if (peopleSheet) {
-    const data = peopleSheet.getDataRange().getValues();
-    for (let i = 1; i < data.length; i++) {
-      const name    = String(data[i][0] || '').trim(); // A：人員
-      const sheetPwd = String(data[i][3] || '').trim(); // D：密碼
-      const dept    = String(data[i][4] || '').trim(); // E：部門
-      if (name && sheetPwd && sheetPwd === pwd) {
-        // 個人密碼正確，同時回傳材料清單
-        const materials = getMaterialsList(ss);
-        return JSON.stringify({ ok: true, name: name, dept: dept, isShared: false, materials: materials });
+  .info-strip {
+    background: var(--accent-light);
+    border: 1px solid #c8c3f5;
+    border-radius: var(--radius);
+    padding: 12px 16px;
+    font-size: 13px;
+    color: #4a3fa0;
+    display: flex; gap: 8px; align-items: flex-start;
+    margin-top: 4px;
+  }
+  .info-strip .i { font-style: normal; font-weight: 700; font-size: 14px; flex-shrink: 0; }
+
+  .urgency-group { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+  .urgency-option { display: none; }
+  .urgency-label {
+    display: flex; flex-direction: column; align-items: center; gap: 4px;
+    border: 1.5px solid var(--border);
+    border-radius: var(--radius);
+    padding: 12px 8px;
+    cursor: pointer;
+    font-size: 13px; color: var(--ink-muted); font-weight: 500;
+    transition: all 0.15s; text-align: center; line-height: 1.4;
+  }
+  .urgency-label .dot { width: 10px; height: 10px; border-radius: 50%; margin-bottom: 2px; }
+  .urgency-option:checked + .urgency-label {
+    border-color: var(--accent-mid);
+    background: var(--accent-light);
+    color: var(--accent);
+  }
+  .u-low .dot { background: #27ae60; }
+  .u-med .dot { background: #f39c12; }
+  .u-high .dot { background: var(--danger); }
+
+  .submit-area { display: flex; flex-direction: column; align-items: center; gap: 12px; padding-top: 8px; }
+  .submit-btn {
+    width: 100%;
+    background: var(--accent); color: #fff;
+    border: none; border-radius: var(--radius);
+    font-family: 'Noto Sans TC', sans-serif;
+    font-size: 15px; font-weight: 600;
+    padding: 14px 24px;
+    cursor: pointer; transition: all 0.2s;
+    letter-spacing: 0.04em;
+  }
+  .submit-btn:hover { background: #3a30a0; transform: translateY(-1px); box-shadow: 0 6px 20px rgba(74,63,160,0.3); }
+  .notice { font-size: 12px; color: var(--ink-light); text-align: center; line-height: 1.6; }
+
+  .success-overlay {
+    display: none; position: fixed; inset: 0;
+    background: rgba(10,10,30,0.55);
+    z-index: 999; align-items: center; justify-content: center; padding: 20px;
+  }
+  .success-overlay.show { display: flex; }
+  .success-box {
+    background: var(--surface); border-radius: 20px; padding: 40px 36px;
+    max-width: 440px; width: 100%; text-align: center;
+    animation: popIn 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+  }
+  @keyframes popIn { from { opacity:0; transform:scale(0.85); } to { opacity:1; transform:scale(1); } }
+  .success-icon {
+    width: 56px; height: 56px; background: #e9faf1; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    margin: 0 auto 18px; font-size: 26px;
+  }
+  .success-box h2 { font-family: 'DM Serif Display', serif; font-size: 24px; color: var(--ink); margin-bottom: 10px; }
+  .success-box p { font-size: 14px; color: var(--ink-muted); line-height: 1.7; margin-bottom: 24px; }
+  .success-ref { background: var(--surface-2); border-radius: 8px; padding: 10px 16px; font-size: 13px; color: var(--ink-muted); margin-bottom: 22px; }
+  .success-ref strong { color: var(--accent); font-size: 15px; }
+  .close-btn {
+    background: var(--accent); color: #fff; border: none; border-radius: var(--radius);
+    font-family: 'Noto Sans TC', sans-serif; font-size: 14px; font-weight: 600;
+    padding: 11px 28px; cursor: pointer; transition: background 0.15s;
+  }
+  .close-btn:hover { background: #3a30a0; }
+
+  /* ── 頁籤導航 ── */
+  .tab-nav {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 24px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 6px;
+  }
+  .tab-btn {
+    flex: 1;
+    background: none;
+    border: none;
+    border-radius: 8px;
+    padding: 10px 16px;
+    font-family: 'Noto Sans TC', sans-serif;
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--ink-muted);
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .tab-btn.active {
+    background: var(--accent);
+    color: #fff;
+    font-weight: 600;
+  }
+  .tab-btn:hover:not(.active) { background: var(--surface-2); color: var(--ink); }
+
+  /* ── 歷史記錄 ── */
+  #historyPage { display: none; }
+  .history-loading { text-align: center; color: var(--ink-muted); padding: 40px 0; font-size: 14px; }
+  .history-empty   { text-align: center; color: var(--ink-light); padding: 40px 0; font-size: 14px; }
+  .history-table-wrap { overflow-x: auto; }
+  .history-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+  .history-table th {
+    background: var(--accent);
+    color: #fff;
+    font-weight: 600;
+    padding: 10px 12px;
+    text-align: left;
+    white-space: nowrap;
+  }
+  .history-table td {
+    padding: 9px 12px;
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+    color: var(--ink);
+  }
+  .history-table tr:nth-child(even) td { background: var(--surface-2); }
+  .history-table tr:hover td { background: var(--accent-light); }
+  .badge-pending  { background: #fff3cd; color: #856404; border-radius: 6px; padding: 2px 8px; font-size: 11px; font-weight: 600; }
+  .badge-done     { background: #d1e7dd; color: #0f5132; border-radius: 6px; padding: 2px 8px; font-size: 11px; font-weight: 600; }
+  .badge-reject   { background: #f8d7da; color: #842029; border-radius: 6px; padding: 2px 8px; font-size: 11px; font-weight: 600; }
+
+  @media (max-width: 540px) {
+    .grid-2 { grid-template-columns: 1fr; }
+    .col-full { grid-column: 1; }
+    .card { padding: 20px 16px; }
+    .items-header { display: none; }
+    .item-row { grid-template-columns: 1fr 1fr; grid-template-rows: auto auto; }
+    .item-row .material-name { grid-column: 1 / -1; }
+    .remove-btn { justify-self: end; }
+    .urgency-group { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ══ 密碼畫面 ══════════════════════════════════════════════════ -->
+<div id="loginScreen">
+  <div class="login-box">
+    <div class="lock-icon">🔒</div>
+    <h2>材料申請單</h2>
+    <p>紙川有限公司<br>請輸入密碼以進入申請表單</p>
+    <div class="login-field">
+      <label for="pwdInput">密碼</label>
+      <input type="password" id="pwdInput" placeholder="請輸入密碼"
+             onkeydown="if(event.key==='Enter') doLogin()">
+    </div>
+    <button class="login-btn" id="loginBtn" onclick="doLogin()">確認進入</button>
+    <div class="login-error" id="loginError"></div>
+  </div>
+</div>
+
+<!-- ══ 主表單 ════════════════════════════════════════════════════ -->
+<div class="page" id="mainPage" style="display:none;">
+  <div class="header">
+    <div class="badge">紙川有限公司</div>
+    <h1>材料申請單</h1>
+    <p>請填寫以下資料，負責人員將於收到申請後安排發放。</p>
+  </div>
+
+  <!-- 頁籤 -->
+  <div class="tab-nav">
+    <button class="tab-btn active" id="tabApply" onclick="switchTab('apply')">📋 申請表單</button>
+    <button class="tab-btn" id="tabHistory" onclick="switchTab('history')">🕐 歷史記錄</button>
+  </div>
+
+  <!-- 歷史記錄頁 -->
+  <div id="historyPage">
+    <div class="card">
+      <div class="section-title">我的申請記錄</div>
+      <div id="historyContent">
+        <div class="history-loading">載入中…</div>
+      </div>
+    </div>
+  </div>
+
+  <form id="mainForm" onsubmit="handleSubmit(event)" novalidate>
+
+    <div class="card">
+      <div class="section-title">申請人資訊</div>
+      <div class="grid-2">
+        <div class="field">
+          <label>姓名 <span class="req">*</span></label>
+          <select id="name" required onchange="onNameChange()">
+            <option value="">請選擇姓名</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>部門</label>
+          <input type="text" id="dept" placeholder="選擇姓名後自動帶入" disabled>
+        </div>
+        <div class="field col-full">
+          <label>申請日期</label>
+          <input type="date" id="applyDate" disabled>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="section-title">申請材料明細</div>
+      <div class="items-header">
+        <span>材料名稱</span>
+        <span>規格／備註</span>
+        <span>數量</span>
+        <span></span>
+      </div>
+      <div id="itemsContainer"></div>
+      <button type="button" class="add-row-btn" onclick="addRow()">
+        <span class="icon">+</span> 新增材料
+      </button>
+    </div>
+
+    <div class="card">
+      <div class="section-title">緊急程度與用途</div>
+      <div class="grid-2">
+        <div class="field col-full">
+          <label>緊急程度 <span class="req">*</span></label>
+          <div class="urgency-group">
+            <span>
+              <input type="radio" class="urgency-option" name="urgency" id="u1" value="一般" required>
+              <label for="u1" class="urgency-label u-low"><span class="dot"></span>一般<br><span style="font-weight:400;font-size:11px;color:inherit">3–5 個工作天</span></label>
+            </span>
+            <span>
+              <input type="radio" class="urgency-option" name="urgency" id="u2" value="稍急">
+              <label for="u2" class="urgency-label u-med"><span class="dot"></span>稍急<br><span style="font-weight:400;font-size:11px;color:inherit">1–2 個工作天</span></label>
+            </span>
+            <span>
+              <input type="radio" class="urgency-option" name="urgency" id="u3" value="緊急">
+              <label for="u3" class="urgency-label u-high"><span class="dot"></span>緊急<br><span style="font-weight:400;font-size:11px;color:inherit">當天或隔天</span></label>
+            </span>
+          </div>
+        </div>
+        <div class="field col-full">
+          <label>用途說明</label>
+          <textarea id="usage" placeholder="請簡述這批材料的使用目的（選填）"></textarea>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="section-title">其他備注</div>
+      <div class="field">
+        <textarea id="remarks" placeholder="任何特殊需求或補充說明（選填）" style="min-height:70px;"></textarea>
+      </div>
+      <div class="info-strip" style="margin-top:16px;">
+        <span class="i">ℹ</span>
+        <span>申請送出後，系統將自動記錄至 Google Sheet，負責人員將依序處理並聯繫您領取材料。領取時請出示此申請單號並完成簽收。</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="submit-area">
+        <button type="submit" class="submit-btn">送出申請</button>
+        <p class="notice">提交即表示您確認以上資料正確無誤。<br>如需修改請聯繫紙川有限公司負責人員。</p>
+      </div>
+    </div>
+
+  </form>
+</div>
+
+<div class="success-overlay" id="successOverlay">
+  <div class="success-box">
+    <div class="success-icon">✓</div>
+    <h2>申請已送出！</h2>
+    <p>您的材料申請已成功記錄。<br>負責人員將盡快安排處理並與您聯繫。</p>
+    <div class="success-ref">申請單號：<strong id="refNum">—</strong></div>
+    <button class="close-btn" onclick="resetForm()">確認，完成</button>
+  </div>
+</div>
+
+<script>
+  // ▼▼▼ Apps Script 部署網址 ▼▼▼
+  const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbwyux66QUiN15A18adxuauBZeKpqcQDpRjNuF2G1ij034ARpmp4YAruRfbR0l6RdZJhWg/exec";
+  // ▲▲▲ 只需要改這一行 ▲▲▲
+
+  let currentUser = null;
+  let sheetData   = { people: [], materials: [] };
+
+  // ★ 新增：記住最後選擇的姓名（切換頁籤前先存）
+  let _lastSelectedName = '';
+
+  // ── JSONP 工具 ─────────────────────────────────────────────────
+  function jsonpCall(url, callback) {
+    const cbName  = '_cb_' + Date.now();
+    const scriptId = cbName + '_script';
+    const timer   = setTimeout(function() {
+      delete window[cbName];
+      const s = document.getElementById(scriptId);
+      if (s) s.remove();
+      callback(null);
+    }, 10000);
+
+    window[cbName] = function(data) {
+      clearTimeout(timer);
+      delete window[cbName];
+      const s = document.getElementById(scriptId);
+      if (s) s.remove();
+      callback(data);
+    };
+
+    const s = document.createElement('script');
+    s.id  = scriptId;
+    s.src = url + '&callback=' + cbName;
+    s.onerror = function() {
+      clearTimeout(timer);
+      delete window[cbName];
+      s.remove();
+      callback(null);
+    };
+    document.head.appendChild(s);
+  }
+
+  // ── 登入 ──────────────────────────────────────────────────────
+  function doLogin() {
+    const pwd    = document.getElementById('pwdInput').value.trim();
+    const errEl  = document.getElementById('loginError');
+    const btn    = document.getElementById('loginBtn');
+    errEl.textContent = '';
+
+    if (!pwd) { errEl.textContent = '請輸入密碼'; return; }
+
+    btn.textContent = '驗證中…';
+    btn.disabled    = true;
+
+    const url = WEB_APP_URL + '?action=login&pwd=' + encodeURIComponent(pwd);
+    jsonpCall(url, function(res) {
+      btn.textContent = '確認進入';
+      btn.disabled    = false;
+
+      if (!res) {
+        errEl.textContent = '連線失敗，請稍後再試';
+        return;
       }
+      if (!res.ok) {
+        errEl.textContent = '密碼錯誤，請再試一次';
+        document.getElementById('pwdInput').value = '';
+        document.getElementById('pwdInput').focus();
+        return;
+      }
+
+      if (res.isShared) {
+        currentUser = null;
+        sheetData.people    = res.people    || [];
+        sheetData.materials = res.materials || [];
+      } else {
+        currentUser = { name: res.name, dept: res.dept };
+        sheetData.materials = res.materials || [];
+      }
+
+      enterForm();
+    });
+  }
+
+  // ── 進入表單 ───────────────────────────────────────────────────
+  function enterForm() {
+    document.getElementById('loginScreen').classList.add('hidden');
+    document.getElementById('mainPage').style.display = 'block';
+    document.getElementById('mainForm').style.display  = '';
+    document.getElementById('historyPage').style.display = 'none';
+    document.getElementById('tabApply').classList.add('active');
+    document.getElementById('tabHistory').classList.remove('active');
+
+    buildMaterialOptions();
+    addRow();
+    document.getElementById('applyDate').value = today();
+
+    if (currentUser) {
+      const nameEl = document.getElementById('name');
+      nameEl.innerHTML = '<option value="' + currentUser.name + '">' + currentUser.name + '</option>';
+      nameEl.disabled  = true;
+      document.getElementById('dept').value = currentUser.dept || '';
+      // ★ 個人登入時直接記住姓名
+      _lastSelectedName = currentUser.name;
+    } else {
+      buildNameSelect();
     }
   }
 
-  // 再比對共用密碼
-  if (pwd === SHARED_PASSWORD) {
-    const people    = getPeopleList(ss);
-    const materials = getMaterialsList(ss);
-    return JSON.stringify({ ok: true, isShared: true, people: people, materials: materials });
+  // ── 姓名下拉 ──────────────────────────────────────────────────
+  function buildNameSelect() {
+    const sel = document.getElementById('name');
+    sel.innerHTML = '<option value="">請選擇姓名</option>';
+    sheetData.people.forEach(function(p) {
+      const opt = document.createElement('option');
+      opt.value = p.name;
+      opt.dataset.dept = p.dept || '';
+      opt.textContent  = p.name;
+      sel.appendChild(opt);
+    });
   }
 
-  return JSON.stringify({ ok: false });
-}
-
-
-// =================================================================
-//  取得人員清單（共用密碼登入時用，不含密碼）
-// =================================================================
-function getPeopleList(ss) {
-  const sheet = ss.getSheetByName(CONFIG.人員清單頁名稱);
-  if (!sheet) return [];
-  const data = sheet.getDataRange().getValues();
-  const list = [];
-  for (let i = 1; i < data.length; i++) {
-    const name = String(data[i][0] || '').trim(); // A：人員
-    const dept = String(data[i][4] || '').trim(); // E：部門
-    if (name) list.push({ name: name, dept: dept });
+  function onNameChange() {
+    const sel = document.getElementById('name');
+    const opt = sel.options[sel.selectedIndex];
+    document.getElementById('dept').value = opt ? (opt.dataset.dept || '') : '';
+    // ★ 每次選姓名都更新快取
+    _lastSelectedName = sel.value;
   }
-  return list;
-}
 
-
-// =================================================================
-//  取得材料清單
-// =================================================================
-function getMaterialsList(ss) {
-  const sheet = ss.getSheetByName(CONFIG.材料清單頁名稱);
-  if (!sheet) return [];
-  const data = sheet.getDataRange().getValues();
-  const list = [];
-  for (let i = 1; i < data.length; i++) {
-    const name = String(data[i][0] || '').trim();
-    const spec = String(data[i][1] || '').trim();
-    if (name) list.push({ name: name, spec: spec });
+  // ── 材料選項 ──────────────────────────────────────────────────
+  function buildMaterialOptions() {
+    window._matOptions = '<option value="">選擇材料</option>' +
+      sheetData.materials.map(function(m) {
+        return '<option value="' + m.name + '" data-spec="' + (m.spec || '') + '">' + m.name + '</option>';
+      }).join('') +
+      '<option value="其他">其他</option>';
   }
-  return list;
-}
 
-function getMaterialsJSON() {
-  const ss = SHEET_ID
-    ? SpreadsheetApp.openById(SHEET_ID)
-    : SpreadsheetApp.getActiveSpreadsheet();
-  return JSON.stringify({ materials: getMaterialsList(ss) });
-}
+  // ── 材料列 ────────────────────────────────────────────────────
+  let rowCount = 0;
 
-
-// =================================================================
-//  寫入申請記錄
-// =================================================================
-function appendRecord(data) {
-  const ss = SHEET_ID
-    ? SpreadsheetApp.openById(SHEET_ID)
-    : SpreadsheetApp.getActiveSpreadsheet();
-  const sheet = ss.getSheetByName(CONFIG.申請記錄頁名稱);
-  const items = data.items || [{}];
-
-  items.forEach(item => {
-    const row = [
-      data.ref        || "",  // A 申請單號
-      data.name       || "",  // B 申請人姓名
-      data.dept       || "",  // C 部門
-      data.applyDate  || "",  // D 申請日期
-      item.name       || "",  // E 材料名稱
-      item.spec       || "",  // F 規格
-      item.qty        || "",  // G 申請數量
-      data.urgency    || "",  // H 緊急程度
-      data.usage      || "",  // I 用途說明
-      data.remarks    || "",  // J 備注
-      "待處理",               // K 處理狀態
-      "",                     // L 實際發放日期
-      "",                     // M 處理日期
-      false,                  // N 已簽收確認
-      "",                     // O 負責人
-      "",                     // P 備注（負責人）
-    ];
-    sheet.appendRow(row);
-    const newRow   = sheet.getLastRow();
-    const checkCol = RECORD_COLUMNS.findIndex(c => c.key === "已簽收確認") + 1;
-    sheet.getRange(newRow, checkCol).insertCheckboxes();
-  });
-}
-
-
-// =================================================================
-//  工具函式
-// =================================================================
-function applyAlternatingColors(sheet, startRow, numRows, numCols) {
-  for (let r = startRow; r < startRow + numRows; r++) {
-    sheet.getRange(r, 1, 1, numCols).setBackground(r % 2 === 0 ? "#F5F5FA" : "#FFFFFF");
+  function addRow() {
+    rowCount++;
+    const id   = rowCount;
+    const opts = window._matOptions || '<option value="">選擇材料</option><option value="其他">其他</option>';
+    const div  = document.createElement('div');
+    div.className = 'item-row';
+    div.id = 'row-' + id;
+    div.innerHTML =
+      '<div class="field material-name">' +
+        '<select class="mat-name" onchange="onMaterialChange(' + id + ')" required>' + opts + '</select>' +
+        '<div class="custom-material-input hidden" id="custom-' + id + '">' +
+          '<input type="text" class="mat-custom" placeholder="請輸入材料名稱">' +
+        '</div>' +
+      '</div>' +
+      '<div class="field"><input type="text" class="mat-spec" placeholder="規格（選填）"></div>' +
+      '<div class="field"><input type="number" class="mat-qty" placeholder="數量" min="1" required></div>' +
+      '<button type="button" class="remove-btn" onclick="removeRow(' + id + ')" title="移除">×</button>';
+    document.getElementById('itemsContainer').appendChild(div);
   }
-}
 
-function columnLetter(col) {
-  let letter = "";
-  while (col > 0) {
-    const rem = (col - 1) % 26;
-    letter = String.fromCharCode(65 + rem) + letter;
-    col = Math.floor((col - 1) / 26);
+  function removeRow(id) {
+    const el = document.getElementById('row-' + id);
+    if (el) el.remove();
   }
-  return letter;
-}
 
-// =================================================================
-//  讀取申請記錄（依姓名篩選）
-// =================================================================
-function getHistoryJSON(name) {
-  if (!name) return JSON.stringify({ records: [], headers: [] });
+  function onMaterialChange(id) {
+    const row       = document.getElementById('row-' + id);
+    const sel       = row.querySelector('.mat-name');
+    const specInput = row.querySelector('.mat-spec');
+    const customDiv = document.getElementById('custom-' + id);
+    const customIn  = row.querySelector('.mat-custom');
+    const opt       = sel.options[sel.selectedIndex];
+    if (sel.value === '其他') {
+      customDiv.classList.remove('hidden');
+      customIn.required = true;
+      specInput.value   = '';
+    } else {
+      customDiv.classList.add('hidden');
+      customIn.required = false;
+      customIn.value    = '';
+      specInput.value   = opt ? (opt.dataset.spec || '') : '';
+    }
+  }
 
-  const ss = SHEET_ID
-    ? SpreadsheetApp.openById(SHEET_ID)
-    : SpreadsheetApp.getActiveSpreadsheet();
+  // ── 工具 ──────────────────────────────────────────────────────
+  function today() { return new Date().toISOString().split('T')[0]; }
 
-  const sheet = ss.getSheetByName(CONFIG.申請記錄頁名稱);
-  if (!sheet) return JSON.stringify({ records: [], headers: [] });
+  function genRef() {
+    const d = new Date();
+    const ymd = d.getFullYear() +
+      String(d.getMonth()+1).padStart(2,'0') +
+      String(d.getDate()).padStart(2,'0');
+    return 'REQ-' + ymd + '-' + (Math.floor(Math.random()*9000)+1000);
+  }
 
-  const allData = sheet.getDataRange().getValues();
-  if (allData.length < 2) return JSON.stringify({ records: [], headers: [] });
+  // ── 送出 ──────────────────────────────────────────────────────
+  async function handleSubmit(e) {
+    e.preventDefault();
+    const name      = document.getElementById('name').value.trim();
+    const dept      = document.getElementById('dept').value.trim();
+    const applyDate = document.getElementById('applyDate').value;
+    const urgency   = document.querySelector('input[name="urgency"]:checked');
+    const rows      = document.querySelectorAll('.item-row');
 
-  const headers = allData[0].map(String); // 第一列為標題
-  const nameCol = headers.indexOf("申請人姓名"); // B欄（index 1）
-  const records = [];
+    if (rows.length === 0) { alert('請至少新增一項申請材料。'); return; }
 
-  for (let i = 1; i < allData.length; i++) {
-    const rowName = String(allData[i][nameCol] || '').trim();
-    if (rowName === name) {
-      // 把每列轉成 { 欄位名: 值 } 物件
-      const row = {};
-      headers.forEach(function(h, idx) {
-        let val = allData[i][idx];
-        // 日期格式處理
-        if (val instanceof Date) {
-          val = Utilities.formatDate(val, Session.getScriptTimeZone(), 'yyyy/MM/dd');
+    let valid = true;
+    const items = [];
+    rows.forEach(function(row) {
+      const selVal   = row.querySelector('.mat-name').value;
+      const customIn = row.querySelector('.mat-custom');
+      const qty      = row.querySelector('.mat-qty').value;
+      let matName    = selVal === '其他' ? (customIn ? customIn.value.trim() : '') : selVal;
+      if (!matName || !qty || parseInt(qty) < 1) { valid = false; return; }
+      items.push({ name: matName, spec: row.querySelector('.mat-spec').value, qty: qty });
+    });
+
+    if (!name || !dept || !applyDate || !urgency || !valid) {
+      alert('請填寫所有必填欄位（標有 * 號）並確認材料明細完整。');
+      return;
+    }
+
+    const ref = genRef();
+    const formData = {
+      ref, name, dept, applyDate, needDate: '',
+      urgency: urgency.value,
+      usage:   document.getElementById('usage').value,
+      remarks: document.getElementById('remarks').value,
+      items
+    };
+
+    const btn = document.querySelector('.submit-btn');
+    btn.textContent = '送出中…'; btn.disabled = true;
+
+    try {
+      await fetch(WEB_APP_URL, { method: 'POST', mode: 'no-cors', body: JSON.stringify(formData) });
+    } catch(err) { console.warn('Sheet 寫入失敗：', err); }
+
+    btn.textContent = '送出申請'; btn.disabled = false;
+    document.getElementById('refNum').textContent = ref;
+    document.getElementById('successOverlay').classList.add('show');
+  }
+
+  // ── 重設 ──────────────────────────────────────────────────────
+  function resetForm() {
+    document.getElementById('successOverlay').classList.remove('show');
+    document.getElementById('mainForm').reset();
+    document.getElementById('itemsContainer').innerHTML = '';
+    rowCount = 0;
+
+    if (currentUser) {
+      document.getElementById('dept').value = currentUser.dept || '';
+      _lastSelectedName = currentUser.name;
+    } else {
+      document.getElementById('dept').value = '';
+      _lastSelectedName = '';
+      buildNameSelect();
+    }
+
+    buildMaterialOptions();
+    addRow();
+    document.getElementById('applyDate').value = today();
+  }
+
+  // ── 頁籤切換（★ 修正：切換前先存好姓名）────────────────────────
+  function switchTab(tab) {
+    const applyForm  = document.getElementById('mainForm');
+    const historyDiv = document.getElementById('historyPage');
+    const tabApply   = document.getElementById('tabApply');
+    const tabHistory = document.getElementById('tabHistory');
+
+    if (tab === 'apply') {
+      applyForm.style.display  = '';
+      historyDiv.style.display = 'none';
+      tabApply.classList.add('active');
+      tabHistory.classList.remove('active');
+    } else {
+      // ★ 在表單還可見時先抓姓名，避免隱藏後抓不到
+      const nameVal = document.getElementById('name').value.trim();
+      if (nameVal) _lastSelectedName = nameVal;
+
+      applyForm.style.display  = 'none';
+      historyDiv.style.display = '';
+      tabApply.classList.remove('active');
+      tabHistory.classList.add('active');
+      loadHistory();
+    }
+  }
+
+  // ── 載入歷史記錄（★ 修正：優先用快取的姓名）─────────────────────
+  function loadHistory() {
+    // 個人登入 → currentUser.name；共用登入 → _lastSelectedName
+    const name = currentUser ? currentUser.name : _lastSelectedName;
+
+    if (!name) {
+      document.getElementById('historyContent').innerHTML =
+        '<div class="history-empty">請先在申請表單選擇姓名，再查看歷史記錄</div>';
+      return;
+    }
+
+    document.getElementById('historyContent').innerHTML =
+      '<div class="history-loading">載入中…</div>';
+
+    const url = WEB_APP_URL + '?action=getHistory&name=' + encodeURIComponent(name);
+    jsonpCall(url, function(res) {
+      if (!res || !res.records) {
+        document.getElementById('historyContent').innerHTML =
+          '<div class="history-empty">載入失敗，請稍後再試</div>';
+        return;
+      }
+      renderHistory(res.headers, res.records);
+    });
+  }
+
+  function renderHistory(headers, records) {
+    const el = document.getElementById('historyContent');
+    if (records.length === 0) {
+      el.innerHTML = '<div class="history-empty">目前沒有申請記錄</div>';
+      return;
+    }
+
+    let html = '<div class="history-table-wrap"><table class="history-table"><thead><tr>';
+    headers.forEach(function(h) {
+      html += '<th>' + h + '</th>';
+    });
+    html += '</tr></thead><tbody>';
+
+    records.forEach(function(row) {
+      html += '<tr>';
+      headers.forEach(function(h) {
+        let val = row[h] || '';
+        if (h === '處理狀態') {
+          if (val === '待處理') val = '<span class="badge-pending">待處理</span>';
+          else if (val === '已發放') val = '<span class="badge-done">已發放</span>';
+          else if (val === '駁回') val = '<span class="badge-reject">駁回</span>';
         }
-        row[h] = val === false ? '☐' : val === true ? '☑' : String(val || '');
+        html += '<td>' + val + '</td>';
       });
-      records.push(row);
-    }
+      html += '</tr>';
+    });
+
+    html += '</tbody></table></div>';
+    el.innerHTML = html;
   }
 
-  return JSON.stringify({ headers: headers, records: records });
-}
+  // ── 初始化 ────────────────────────────────────────────────────
+  window._matOptions = '<option value="">選擇材料</option><option value="其他">其他</option>';
+  document.getElementById('pwdInput').focus();
+</script>
+
+</body>
+</html>
