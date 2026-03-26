@@ -628,6 +628,11 @@
   function enterForm() {
     document.getElementById('loginScreen').classList.add('hidden');
     document.getElementById('mainPage').style.display = 'block';
+    // 確保預設顯示申請表單頁籤
+    document.getElementById('mainForm').style.display  = '';
+    document.getElementById('historyPage').style.display = 'none';
+    document.getElementById('tabApply').classList.add('active');
+    document.getElementById('tabHistory').classList.remove('active');
 
     buildMaterialOptions();
     addRow();
