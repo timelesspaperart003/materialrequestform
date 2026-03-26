@@ -90,6 +90,7 @@
   input[type="text"],
   input[type="date"],
   input[type="number"],
+  input[type="password"],
   select,
   textarea {
     border: 1px solid var(--border);
@@ -122,6 +123,71 @@
     cursor: pointer;
   }
 
+  /* ── 密碼畫面 ── */
+  #loginScreen {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    width: 100%;
+    position: fixed;
+    inset: 0;
+    background: #eeeef8;
+    z-index: 9999;
+    padding: 20px;
+  }
+  #loginScreen.hidden { display: none; }
+
+  .login-box {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 40px 36px;
+    max-width: 400px;
+    width: 100%;
+    text-align: center;
+  }
+  .login-box .lock-icon {
+    font-size: 36px;
+    margin-bottom: 16px;
+  }
+  .login-box h2 {
+    font-family: 'DM Serif Display', serif;
+    font-size: 26px;
+    color: var(--ink);
+    margin-bottom: 6px;
+  }
+  .login-box p {
+    font-size: 13px;
+    color: var(--ink-muted);
+    margin-bottom: 24px;
+    line-height: 1.6;
+  }
+  .login-field { text-align: left; margin-bottom: 16px; }
+  .login-field label { display: block; margin-bottom: 6px; }
+  .login-btn {
+    width: 100%;
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: var(--radius);
+    font-family: 'Noto Sans TC', sans-serif;
+    font-size: 15px;
+    font-weight: 600;
+    padding: 12px 24px;
+    cursor: pointer;
+    transition: all 0.2s;
+    margin-top: 4px;
+  }
+  .login-btn:hover { background: #3a30a0; }
+  .login-error {
+    font-size: 13px;
+    color: var(--danger);
+    margin-top: 12px;
+    min-height: 20px;
+  }
+
+  /* ── Loading ── */
   .loading-bar {
     background: var(--accent-light);
     border: 1px solid #c8c3f5;
@@ -145,6 +211,7 @@
   }
   @keyframes spin { to { transform: rotate(360deg); } }
 
+  /* ── 材料列 ── */
   .items-header {
     display: grid;
     grid-template-columns: 2fr 1.2fr 1fr 36px;
@@ -158,7 +225,6 @@
     border-bottom: 1px solid var(--border);
     margin-bottom: 10px;
   }
-
   .item-row {
     display: grid;
     grid-template-columns: 2fr 1.2fr 1fr 36px;
@@ -171,7 +237,6 @@
     from { opacity: 0; transform: translateY(-6px); }
     to   { opacity: 1; transform: translateY(0); }
   }
-
   .remove-btn {
     width: 32px; height: 32px;
     border: 1px solid var(--border);
@@ -186,7 +251,6 @@
     margin-top: 2px;
   }
   .remove-btn:hover { background: #fff0ee; border-color: #f5c0b8; color: var(--danger); }
-
   .add-row-btn {
     display: flex; align-items: center; gap: 6px;
     border: 1.5px dashed var(--border);
@@ -204,7 +268,6 @@
   }
   .add-row-btn:hover { border-color: var(--accent-mid); color: var(--accent); background: var(--accent-light); }
   .add-row-btn .icon { font-size: 18px; line-height: 1; }
-
   .custom-material-input { margin-top: 6px; animation: fadeSlide 0.2s ease; }
   .custom-material-input.hidden { display: none; }
 
@@ -298,7 +361,24 @@
 </head>
 <body>
 
-<div class="page">
+<!-- ══ 密碼畫面 ══════════════════════════════════════════════════ -->
+<div id="loginScreen">
+  <div class="login-box">
+    <div class="lock-icon">🔒</div>
+    <h2>材料申請單</h2>
+    <p>紙川有限公司<br>請輸入密碼以進入申請表單</p>
+    <div class="login-field">
+      <label for="pwdInput">密碼</label>
+      <input type="password" id="pwdInput" placeholder="請輸入密碼"
+             onkeydown="if(event.key==='Enter') doLogin()">
+    </div>
+    <button class="login-btn" onclick="doLogin()">確認進入</button>
+    <div class="login-error" id="loginError"></div>
+  </div>
+</div>
+
+<!-- ══ 主表單（預設隱藏）════════════════════════════════════════ -->
+<div class="page" id="mainPage" style="display:none;">
   <div class="header">
     <div class="badge">紙川有限公司</div>
     <h1>材料申請單</h1>
@@ -405,42 +485,90 @@
 
 <script>
   // ▼▼▼ Apps Script 部署網址 ▼▼▼
-  const WEB_APP_URL = "https://script.google.com/macros/library/d/1d7fUIPf5ZpW10F9BYM7os15DPn1wHvRbyd6YYt5P76Tcgsz4bo08Gt7T/3";
+  const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbyN7ESocFeZ1AO2AH7k5YLBUnf42QKdNulMgxLf0pJ1iZq79wdW2PHpg-YO94Sw-y1UoA/exec";
   // ▲▲▲ 只需要改這一行 ▲▲▲
 
+  const SHARED_PASSWORD = "timeless"; // 共用密碼
+
   let sheetData = { people: [], materials: [] };
+  let currentUser = null; // 登入後的使用者資料 { name, dept } 或 null（共用密碼）
 
-  // ── JSONP 讀取清單（繞過 CORS）────────────────────────────────
-  function loadSheetData() {
+  // ── JSONP 讀取清單 ─────────────────────────────────────────────
+  function loadSheetData(onDone) {
     const cbName = '_jsonpCb_' + Date.now();
-
     const timer = setTimeout(function() {
       console.warn('清單讀取逾時');
-      finish();
+      cleanup(); if (onDone) onDone();
     }, 10000);
 
-    function finish() {
+    function cleanup() {
       clearTimeout(timer);
       delete window[cbName];
       const s = document.getElementById('_jsonpScript');
       if (s) s.remove();
-      document.getElementById('loadingBar').classList.add('hidden');
-      addRow();
     }
 
     window[cbName] = function(data) {
       if (data.people)    sheetData.people    = data.people;
       if (data.materials) sheetData.materials = data.materials;
-      buildNameSelect();
-      buildMaterialOptions();
-      finish();
+      cleanup();
+      if (onDone) onDone();
     };
 
     const s = document.createElement('script');
     s.id  = '_jsonpScript';
     s.src = WEB_APP_URL + '?action=getList&callback=' + cbName;
-    s.onerror = function() { console.warn('JSONP 失敗'); finish(); };
+    s.onerror = function() { cleanup(); if (onDone) onDone(); };
     document.head.appendChild(s);
+  }
+
+  // ── 密碼登入 ───────────────────────────────────────────────────
+  function doLogin() {
+    const pwd = document.getElementById('pwdInput').value.trim();
+    const errEl = document.getElementById('loginError');
+    errEl.textContent = '';
+
+    if (!pwd) { errEl.textContent = '請輸入密碼'; return; }
+
+    // 先比對個人密碼（需要清單已載入）
+    const matched = sheetData.people.find(function(p) {
+      return p.pwd && p.pwd === pwd;
+    });
+
+    if (matched) {
+      // 個人密碼正確
+      currentUser = { name: matched.name, dept: matched.dept };
+      enterForm();
+    } else if (pwd === SHARED_PASSWORD) {
+      // 共用密碼正確
+      currentUser = null;
+      enterForm();
+    } else {
+      errEl.textContent = '密碼錯誤，請再試一次';
+      document.getElementById('pwdInput').value = '';
+      document.getElementById('pwdInput').focus();
+    }
+  }
+
+  // ── 進入表單 ───────────────────────────────────────────────────
+  function enterForm() {
+    document.getElementById('loginScreen').classList.add('hidden');
+    document.getElementById('mainPage').style.display = 'block';
+    document.getElementById('loadingBar').classList.remove('hidden');
+
+    buildNameSelect();
+    buildMaterialOptions();
+    document.getElementById('loadingBar').classList.add('hidden');
+    addRow();
+    document.getElementById('applyDate').value = today();
+
+    // 個人密碼登入：自動帶入姓名、部門，設為唯讀
+    if (currentUser) {
+      const nameEl = document.getElementById('name');
+      nameEl.innerHTML = '<option value="' + currentUser.name + '">' + currentUser.name + '</option>';
+      nameEl.disabled = true;
+      document.getElementById('dept').value = currentUser.dept || '';
+    }
   }
 
   // ── 姓名下拉 ──────────────────────────────────────────────────
@@ -476,9 +604,9 @@
 
   function addRow() {
     rowCount++;
-    const id  = rowCount;
+    const id   = rowCount;
     const opts = window._matOptions || '<option value="">選擇材料</option><option value="其他">其他</option>';
-    const div = document.createElement('div');
+    const div  = document.createElement('div');
     div.className = 'item-row';
     div.id = 'row-' + id;
     div.innerHTML =
@@ -506,7 +634,6 @@
     const customDiv = document.getElementById('custom-' + id);
     const customIn  = row.querySelector('.mat-custom');
     const opt       = sel.options[sel.selectedIndex];
-
     if (sel.value === '其他') {
       customDiv.classList.remove('hidden');
       customIn.required = true;
@@ -583,17 +710,27 @@
     document.getElementById('successOverlay').classList.remove('show');
     document.getElementById('mainForm').reset();
     document.getElementById('itemsContainer').innerHTML = '';
-    document.getElementById('dept').value = '';
     rowCount = 0;
+
+    if (currentUser) {
+      // 個人登入：保留姓名、部門
+      document.getElementById('dept').value = currentUser.dept || '';
+    } else {
+      document.getElementById('dept').value = '';
+      buildNameSelect();
+    }
+
     buildMaterialOptions();
     addRow();
     document.getElementById('applyDate').value = today();
   }
 
-  // ── 初始化 ────────────────────────────────────────────────────
-  document.getElementById('applyDate').value = today();
+  // ── 初始化：先載入清單，再顯示密碼頁 ───────────────────────
   window._matOptions = '<option value="">選擇材料</option><option value="其他">其他</option>';
-  loadSheetData();
+  loadSheetData(function() {
+    // 資料載入完成，密碼頁就緒
+    document.getElementById('pwdInput').focus();
+  });
 </script>
 
 </body>
