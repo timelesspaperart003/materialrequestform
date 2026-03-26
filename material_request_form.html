@@ -573,7 +573,11 @@
     return `REQ-${ymd}-${rnd}`;
   }
 
-  function handleSubmit(e) {
+  // ▼▼▼ 把 Apps Script 部署後的網址貼在這裡 ▼▼▼
+  const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbyN7ESocFeZ1AO2AH7k5YLBUnf42QKdNulMgxLf0pJ1iZq79wdW2PHpg-YO94Sw-y1UoA/exec";
+  // ▲▲▲ 只需要改這一行 ▲▲▲
+
+  async function handleSubmit(e) {
     e.preventDefault();
     const name = document.getElementById('name').value.trim();
     const dept = document.getElementById('dept').value;
@@ -585,9 +589,9 @@
 
     let valid = true;
     rows.forEach(row => {
-      const name = row.querySelector('.mat-name').value;
+      const n = row.querySelector('.mat-name').value;
       const qty = row.querySelector('.mat-qty').value;
-      if (!name || !qty || parseInt(qty) < 1) valid = false;
+      if (!n || !qty || parseInt(qty) < 1) valid = false;
     });
 
     if (!name || !dept || !applyDate || !urgency || !valid) {
@@ -595,7 +599,46 @@
       return;
     }
 
+    // 收集所有材料列
+    const items = [];
+    rows.forEach(row => {
+      items.push({
+        name: row.querySelector('.mat-name').value,
+        spec: row.querySelector('.mat-spec').value,
+        qty:  row.querySelector('.mat-qty').value,
+      });
+    });
+
     const ref = genRef();
+    const formData = {
+      ref,
+      name,
+      dept,
+      applyDate,
+      needDate: document.getElementById('needDate').value,
+      urgency:  urgency.value,
+      usage:    document.getElementById('usage').value,
+      remarks:  document.getElementById('remarks').value,
+      items,
+    };
+
+    // 送出按鈕改為讀取中狀態
+    const btn = document.querySelector('.submit-btn');
+    btn.textContent = '送出中…';
+    btn.disabled = true;
+
+    try {
+      await fetch(WEB_APP_URL, {
+        method: 'POST',
+        mode: 'no-cors',
+        body: JSON.stringify(formData),
+      });
+    } catch (err) {
+      console.warn('Sheet 寫入失敗（不影響申請單號產生）：', err);
+    }
+
+    btn.textContent = '送出申請';
+    btn.disabled = false;
     document.getElementById('refNum').textContent = ref;
     document.getElementById('successOverlay').classList.add('show');
   }
