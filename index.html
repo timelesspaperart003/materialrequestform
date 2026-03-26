@@ -552,24 +552,25 @@
 
   // ── JSONP 工具 ─────────────────────────────────────────────────
   function jsonpCall(url, callback) {
-    const cbName = '_cb_' + Date.now();
-    const timer  = setTimeout(function() {
+    const cbName  = '_cb_' + Date.now();
+    const scriptId = cbName + '_script';
+    const timer   = setTimeout(function() {
       delete window[cbName];
-      const s = document.getElementById('_jsonpScript');
+      const s = document.getElementById(scriptId);
       if (s) s.remove();
-      callback(null); // 逾時
+      callback(null);
     }, 10000);
 
     window[cbName] = function(data) {
       clearTimeout(timer);
       delete window[cbName];
-      const s = document.getElementById('_jsonpScript');
+      const s = document.getElementById(scriptId);
       if (s) s.remove();
       callback(data);
     };
 
     const s = document.createElement('script');
-    s.id  = '_jsonpScript';
+    s.id  = scriptId;
     s.src = url + '&callback=' + cbName;
     s.onerror = function() {
       clearTimeout(timer);
