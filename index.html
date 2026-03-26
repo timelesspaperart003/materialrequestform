@@ -491,15 +491,15 @@
           <div class="urgency-group">
             <span>
               <input type="radio" class="urgency-option" name="urgency" id="u1" value="一般" required>
-              <label for="u1" class="urgency-label u-low"><span class="dot"></span>一般<br><span style="font-weight:400;font-size:11px;color:inherit">3–5 個工作天</span></label>
+              <label for="u1" class="urgency-label u-low"><span class="dot"></span>一般<br><span style="font-weight:400;font-size:11px;color:inherit">15-20個工作天</span></label>
             </span>
             <span>
               <input type="radio" class="urgency-option" name="urgency" id="u2" value="稍急">
-              <label for="u2" class="urgency-label u-med"><span class="dot"></span>稍急<br><span style="font-weight:400;font-size:11px;color:inherit">1–2 個工作天</span></label>
+              <label for="u2" class="urgency-label u-med"><span class="dot"></span>稍急<br><span style="font-weight:400;font-size:11px;color:inherit">7-12個工作天</span></label>
             </span>
             <span>
               <input type="radio" class="urgency-option" name="urgency" id="u3" value="緊急">
-              <label for="u3" class="urgency-label u-high"><span class="dot"></span>緊急<br><span style="font-weight:400;font-size:11px;color:inherit">當天或隔天</span></label>
+              <label for="u3" class="urgency-label u-high"><span class="dot"></span>緊急<br><span style="font-weight:400;font-size:11px;color:inherit">1-5個工作天</span></label>
             </span>
           </div>
         </div>
@@ -696,7 +696,7 @@
           '<input type="text" class="mat-custom" placeholder="請輸入材料名稱">' +
         '</div>' +
       '</div>' +
-      '<div class="field"><input type="text" class="mat-spec" placeholder="規格（選填）"></div>' +
+      '<div class="field"><input type="text" class="mat-spec" placeholder="規格（選填）" readonly></div>' +
       '<div class="field"><input type="number" class="mat-qty" placeholder="數量" min="1" required></div>' +
       '<button type="button" class="remove-btn" onclick="removeRow(' + id + ')" title="移除">×</button>';
     document.getElementById('itemsContainer').appendChild(div);
