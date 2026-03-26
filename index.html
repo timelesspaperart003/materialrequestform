@@ -140,6 +140,12 @@
     box-shadow: 0 0 0 3px var(--accent-light);
   }
 
+  input:disabled, select:disabled {
+    background: var(--surface-2);
+    color: var(--ink-muted);
+    cursor: not-allowed;
+  }
+
   textarea {
     resize: vertical;
     min-height: 90px;
@@ -153,6 +159,30 @@
     padding-right: 38px;
     cursor: pointer;
   }
+
+  /* Loading state */
+  .loading-bar {
+    background: var(--accent-light);
+    border: 1px solid #c8c3f5;
+    border-radius: var(--radius);
+    padding: 10px 16px;
+    font-size: 13px;
+    color: var(--accent);
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    margin-bottom: 20px;
+  }
+  .loading-bar.hidden { display: none; }
+  .spinner {
+    width: 14px; height: 14px;
+    border: 2px solid var(--accent-light);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+    flex-shrink: 0;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
 
   /* Items table */
   .items-header {
@@ -173,7 +203,7 @@
     display: grid;
     grid-template-columns: 2fr 1.2fr 1fr 36px;
     gap: 10px;
-    align-items: center;
+    align-items: start;
     margin-bottom: 10px;
     animation: fadeSlide 0.2s ease;
   }
@@ -197,6 +227,7 @@
     font-size: 16px;
     transition: all 0.15s;
     flex-shrink: 0;
+    margin-top: 2px;
   }
   .remove-btn:hover { background: #fff0ee; border-color: #f5c0b8; color: var(--danger); }
 
@@ -219,6 +250,13 @@
   }
   .add-row-btn:hover { border-color: var(--accent-mid); color: var(--accent); background: var(--accent-light); }
   .add-row-btn .icon { font-size: 18px; line-height: 1; }
+
+  /* 其他材料輸入框 */
+  .custom-material-input {
+    margin-top: 6px;
+    animation: fadeSlide 0.2s ease;
+  }
+  .custom-material-input.hidden { display: none; }
 
   .info-strip {
     background: var(--accent-light);
@@ -407,31 +445,26 @@
     <!-- 申請人資訊 -->
     <div class="card">
       <div class="section-title">申請人資訊</div>
+
+      <div id="loadingBar" class="loading-bar">
+        <div class="spinner"></div>
+        <span>正在載入清單資料…</span>
+      </div>
+
       <div class="grid-2">
         <div class="field">
           <label>姓名 <span class="req">*</span></label>
-          <input type="text" id="name" placeholder="請輸入您的姓名" required>
-        </div>
-        <div class="field">
-          <label>部門 <span class="req">*</span></label>
-          <select id="dept" required>
-            <option value="">請選擇部門</option>
-            <option>行政部</option>
-            <option>業務部</option>
-            <option>工程部</option>
-            <option>倉儲部</option>
-            <option>品管部</option>
-            <option>其他</option>
+          <select id="name" required onchange="onNameChange()">
+            <option value="">請選擇姓名</option>
           </select>
         </div>
         <div class="field">
-          <label>申請日期 <span class="req">*</span></label>
-          <input type="date" id="applyDate" required>
+          <label>部門</label>
+          <input type="text" id="dept" placeholder="選擇姓名後自動帶入" disabled>
         </div>
-        <div class="field">
-          <label>期望取貨日期</label>
-          <input type="date" id="needDate">
-          <span class="field-hint">如有急用請在緊急程度選擇「緊急」</span>
+        <div class="field col-full">
+          <label>申請日期</label>
+          <input type="date" id="applyDate" disabled>
         </div>
       </div>
     </div>
@@ -521,30 +554,86 @@
 </div>
 
 <script>
-  const MATERIALS = [
-    '熱熔槍', '熱熔膠條', '釘書機', '釘書針', '美工刀', '美工刀片',
-    '膠帶', '雙面膠', '泡棉膠', '剪刀', '尺', '白板筆', '奇異筆',
-    '原子筆', '鉛筆', '修正帶', '便利貼', 'A4 影印紙', '資料夾',
-    '檔案盒', '迴紋針', '長尾夾', '打孔機', '其他'
-  ];
+  // ▼▼▼ Apps Script 部署網址 ▼▼▼
+  const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbyN7ESocFeZ1AO2AH7k5YLBUnf42QKdNulMgxLf0pJ1iZq79wdW2PHpg-YO94Sw-y1UoA/exec";
+  // ▲▲▲ 只需要改這一行 ▲▲▲
 
-  function buildOptions() {
-    return '<option value="">選擇材料</option>' +
-      MATERIALS.map(m => `<option value="${m}">${m}</option>`).join('');
+  // 從 Sheet 讀取的資料
+  let sheetData = {
+    people: [],    // [{ name, dept }]
+    materials: [], // [{ name, spec }]
+  };
+
+  // ── 頁面載入：讀取清單 ──────────────────────────────────────────
+  async function loadSheetData() {
+    try {
+      const res = await fetch(`${WEB_APP_URL}?action=getList`, { method: 'GET' });
+      const json = await res.json();
+
+      // json 格式預期：
+      // { people: [{name, dept}, ...], materials: [{name, spec}, ...] }
+      if (json.people)    sheetData.people    = json.people;
+      if (json.materials) sheetData.materials = json.materials;
+
+      buildNameSelect();
+      buildMaterialOptions();
+    } catch (err) {
+      console.warn('清單讀取失敗，使用備用空清單：', err);
+    } finally {
+      document.getElementById('loadingBar').classList.add('hidden');
+    }
   }
 
+  // ── 建立姓名下拉 ───────────────────────────────────────────────
+  function buildNameSelect() {
+    const sel = document.getElementById('name');
+    sel.innerHTML = '<option value="">請選擇姓名</option>';
+    sheetData.people.forEach(p => {
+      const opt = document.createElement('option');
+      opt.value = p.name;
+      opt.dataset.dept = p.dept || '';
+      opt.textContent = p.name;
+      sel.appendChild(opt);
+    });
+  }
+
+  // ── 姓名選擇後自動帶入部門 ────────────────────────────────────
+  function onNameChange() {
+    const sel = document.getElementById('name');
+    const selected = sel.options[sel.selectedIndex];
+    document.getElementById('dept').value = selected ? (selected.dataset.dept || '') : '';
+  }
+
+  // ── 材料選項（含「其他」） ────────────────────────────────────
+  function buildMaterialOptions() {
+    // 全域快取，addRow 時使用
+    window._matOptions = '<option value="">選擇材料</option>' +
+      sheetData.materials.map(m =>
+        `<option value="${m.name}" data-spec="${m.spec || ''}">${m.name}</option>`
+      ).join('') +
+      '<option value="其他">其他</option>';
+  }
+
+  // ── 材料列 ────────────────────────────────────────────────────
   let rowCount = 0;
+
   function addRow() {
     rowCount++;
     const id = rowCount;
+    const opts = window._matOptions ||
+      '<option value="">選擇材料</option><option value="其他">其他</option>';
+
     const div = document.createElement('div');
     div.className = 'item-row';
     div.id = `row-${id}`;
     div.innerHTML = `
       <div class="field material-name">
-        <select class="mat-name" required>
-          ${buildOptions()}
+        <select class="mat-name" onchange="onMaterialChange(${id})" required>
+          ${opts}
         </select>
+        <div class="custom-material-input hidden" id="custom-${id}">
+          <input type="text" class="mat-custom" placeholder="請輸入材料名稱">
+        </div>
       </div>
       <div class="field">
         <input type="text" class="mat-spec" placeholder="規格（選填）">
@@ -562,6 +651,33 @@
     if (el) el.remove();
   }
 
+  // ── 材料選擇變更：自動帶入規格 / 顯示其他輸入框 ────────────
+  function onMaterialChange(id) {
+    const row = document.getElementById(`row-${id}`);
+    const sel = row.querySelector('.mat-name');
+    const specInput = row.querySelector('.mat-spec');
+    const customDiv = document.getElementById(`custom-${id}`);
+    const customInput = row.querySelector('.mat-custom');
+
+    const selectedOpt = sel.options[sel.selectedIndex];
+    const spec = selectedOpt ? (selectedOpt.dataset.spec || '') : '';
+
+    if (sel.value === '其他') {
+      // 顯示自訂輸入框
+      customDiv.classList.remove('hidden');
+      customInput.required = true;
+      specInput.value = '';
+    } else {
+      // 隱藏自訂輸入框
+      customDiv.classList.add('hidden');
+      customInput.required = false;
+      customInput.value = '';
+      // 自動帶入規格
+      specInput.value = spec;
+    }
+  }
+
+  // ── 工具函式 ──────────────────────────────────────────────────
   function today() {
     return new Date().toISOString().split('T')[0];
   }
@@ -573,14 +689,12 @@
     return `REQ-${ymd}-${rnd}`;
   }
 
-  // ▼▼▼ 把 Apps Script 部署後的網址貼在這裡 ▼▼▼
-  const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbyN7ESocFeZ1AO2AH7k5YLBUnf42QKdNulMgxLf0pJ1iZq79wdW2PHpg-YO94Sw-y1UoA/exec";
-  // ▲▲▲ 只需要改這一行 ▲▲▲
-
+  // ── 送出表單 ──────────────────────────────────────────────────
   async function handleSubmit(e) {
     e.preventDefault();
+
     const name = document.getElementById('name').value.trim();
-    const dept = document.getElementById('dept').value;
+    const dept = document.getElementById('dept').value.trim();
     const applyDate = document.getElementById('applyDate').value;
     const urgency = document.querySelector('input[name="urgency"]:checked');
 
@@ -588,10 +702,25 @@
     if (rows.length === 0) { alert('請至少新增一項申請材料。'); return; }
 
     let valid = true;
+    const items = [];
+
     rows.forEach(row => {
-      const n = row.querySelector('.mat-name').value;
+      const selVal = row.querySelector('.mat-name').value;
+      const customInput = row.querySelector('.mat-custom');
       const qty = row.querySelector('.mat-qty').value;
-      if (!n || !qty || parseInt(qty) < 1) valid = false;
+
+      let matName = selVal;
+      if (selVal === '其他') {
+        matName = customInput ? customInput.value.trim() : '';
+      }
+
+      if (!matName || !qty || parseInt(qty) < 1) { valid = false; return; }
+
+      items.push({
+        name: matName,
+        spec: row.querySelector('.mat-spec').value,
+        qty:  qty,
+      });
     });
 
     if (!name || !dept || !applyDate || !urgency || !valid) {
@@ -599,30 +728,19 @@
       return;
     }
 
-    // 收集所有材料列
-    const items = [];
-    rows.forEach(row => {
-      items.push({
-        name: row.querySelector('.mat-name').value,
-        spec: row.querySelector('.mat-spec').value,
-        qty:  row.querySelector('.mat-qty').value,
-      });
-    });
-
     const ref = genRef();
     const formData = {
       ref,
       name,
       dept,
       applyDate,
-      needDate: document.getElementById('needDate').value,
+      needDate: '',
       urgency:  urgency.value,
       usage:    document.getElementById('usage').value,
       remarks:  document.getElementById('remarks').value,
       items,
     };
 
-    // 送出按鈕改為讀取中狀態
     const btn = document.querySelector('.submit-btn');
     btn.textContent = '送出中…';
     btn.disabled = true;
@@ -643,20 +761,23 @@
     document.getElementById('successOverlay').classList.add('show');
   }
 
+  // ── 重設表單 ──────────────────────────────────────────────────
   function resetForm() {
     document.getElementById('successOverlay').classList.remove('show');
     document.getElementById('mainForm').reset();
     document.getElementById('itemsContainer').innerHTML = '';
+    document.getElementById('dept').value = '';
     rowCount = 0;
     addRow();
     document.getElementById('applyDate').value = today();
   }
 
-  // Init
+  // ── 初始化 ────────────────────────────────────────────────────
   document.getElementById('applyDate').value = today();
+  window._matOptions = '<option value="">選擇材料</option><option value="其他">其他</option>';
   addRow();
+  loadSheetData();
 </script>
 
 </body>
 </html>
-
