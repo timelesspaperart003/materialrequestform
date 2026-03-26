@@ -1,0 +1,618 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>材料申請單</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;600&family=DM+Serif+Display&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --ink: #1a1a2e;
+    --ink-muted: #5a5a7a;
+    --ink-light: #9898b2;
+    --surface: #ffffff;
+    --surface-2: #f5f5fa;
+    --surface-3: #ededf5;
+    --accent: #4a3fa0;
+    --accent-light: #ece9ff;
+    --accent-mid: #7068c4;
+    --border: #d8d8e8;
+    --danger: #c0392b;
+    --success: #1a7a4a;
+    --radius: 10px;
+  }
+
+  body {
+    font-family: 'Noto Sans TC', sans-serif;
+    background: #eeeef8;
+    min-height: 100vh;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    padding: 40px 16px 60px;
+    color: var(--ink);
+  }
+
+  .page {
+    width: 100%;
+    max-width: 720px;
+  }
+
+  .header {
+    text-align: center;
+    margin-bottom: 32px;
+    padding-top: 8px;
+  }
+
+  .header .badge {
+    display: inline-block;
+    background: var(--accent);
+    color: #fff;
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    font-weight: 600;
+    padding: 4px 14px;
+    border-radius: 20px;
+    margin-bottom: 14px;
+    text-transform: uppercase;
+  }
+
+  .header h1 {
+    font-family: 'DM Serif Display', serif;
+    font-size: 36px;
+    color: var(--ink);
+    line-height: 1.15;
+    margin-bottom: 8px;
+  }
+
+  .header p {
+    color: var(--ink-muted);
+    font-size: 14px;
+    line-height: 1.6;
+  }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 32px;
+    margin-bottom: 20px;
+  }
+
+  .section-title {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--accent);
+    margin-bottom: 20px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .section-title::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: var(--surface-3);
+  }
+
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+  .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 18px; }
+  .col-full { grid-column: 1 / -1; }
+
+  .field { display: flex; flex-direction: column; gap: 6px; }
+
+  label {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--ink-muted);
+  }
+
+  label .req {
+    color: var(--accent-mid);
+    margin-left: 3px;
+  }
+
+  input[type="text"],
+  input[type="date"],
+  input[type="number"],
+  select,
+  textarea {
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 10px 14px;
+    font-family: 'Noto Sans TC', sans-serif;
+    font-size: 14px;
+    color: var(--ink);
+    background: var(--surface);
+    outline: none;
+    transition: border-color 0.15s, box-shadow 0.15s;
+    width: 100%;
+    -webkit-appearance: none;
+  }
+
+  input:focus, select:focus, textarea:focus {
+    border-color: var(--accent-mid);
+    box-shadow: 0 0 0 3px var(--accent-light);
+  }
+
+  textarea {
+    resize: vertical;
+    min-height: 90px;
+    line-height: 1.6;
+  }
+
+  select {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' fill='none'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%239898b2' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 14px center;
+    padding-right: 38px;
+    cursor: pointer;
+  }
+
+  /* Items table */
+  .items-header {
+    display: grid;
+    grid-template-columns: 2fr 1.2fr 1fr 36px;
+    gap: 10px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--ink-light);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    padding: 0 4px 8px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 10px;
+  }
+
+  .item-row {
+    display: grid;
+    grid-template-columns: 2fr 1.2fr 1fr 36px;
+    gap: 10px;
+    align-items: center;
+    margin-bottom: 10px;
+    animation: fadeSlide 0.2s ease;
+  }
+
+  @keyframes fadeSlide {
+    from { opacity: 0; transform: translateY(-6px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .remove-btn {
+    width: 32px;
+    height: 32px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface);
+    color: var(--ink-light);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 16px;
+    transition: all 0.15s;
+    flex-shrink: 0;
+  }
+  .remove-btn:hover { background: #fff0ee; border-color: #f5c0b8; color: var(--danger); }
+
+  .add-row-btn {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    border: 1.5px dashed var(--border);
+    border-radius: var(--radius);
+    background: none;
+    color: var(--ink-muted);
+    font-size: 13px;
+    font-family: 'Noto Sans TC', sans-serif;
+    font-weight: 500;
+    cursor: pointer;
+    padding: 9px 14px;
+    width: 100%;
+    transition: all 0.15s;
+    margin-top: 6px;
+  }
+  .add-row-btn:hover { border-color: var(--accent-mid); color: var(--accent); background: var(--accent-light); }
+  .add-row-btn .icon { font-size: 18px; line-height: 1; }
+
+  .info-strip {
+    background: var(--accent-light);
+    border: 1px solid #c8c3f5;
+    border-radius: var(--radius);
+    padding: 12px 16px;
+    font-size: 13px;
+    color: #4a3fa0;
+    display: flex;
+    gap: 8px;
+    align-items: flex-start;
+    margin-top: 4px;
+  }
+  .info-strip .i { font-style: normal; font-weight: 700; font-size: 14px; flex-shrink: 0; }
+
+  .urgency-group {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 10px;
+  }
+
+  .urgency-option { display: none; }
+  .urgency-label {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    border: 1.5px solid var(--border);
+    border-radius: var(--radius);
+    padding: 12px 8px;
+    cursor: pointer;
+    font-size: 13px;
+    color: var(--ink-muted);
+    font-weight: 500;
+    transition: all 0.15s;
+    text-align: center;
+    line-height: 1.4;
+  }
+  .urgency-label .dot {
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    margin-bottom: 2px;
+  }
+  .urgency-option:checked + .urgency-label {
+    border-color: var(--accent-mid);
+    background: var(--accent-light);
+    color: var(--accent);
+  }
+  .u-low .dot { background: #27ae60; }
+  .u-med .dot { background: #f39c12; }
+  .u-high .dot { background: var(--danger); }
+
+  .submit-area {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+    padding-top: 8px;
+  }
+
+  .submit-btn {
+    width: 100%;
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: var(--radius);
+    font-family: 'Noto Sans TC', sans-serif;
+    font-size: 15px;
+    font-weight: 600;
+    padding: 14px 24px;
+    cursor: pointer;
+    transition: all 0.2s;
+    letter-spacing: 0.04em;
+    position: relative;
+    overflow: hidden;
+  }
+  .submit-btn:hover { background: #3a30a0; transform: translateY(-1px); box-shadow: 0 6px 20px rgba(74,63,160,0.3); }
+  .submit-btn:active { transform: translateY(0); }
+
+  .notice {
+    font-size: 12px;
+    color: var(--ink-light);
+    text-align: center;
+    line-height: 1.6;
+  }
+
+  /* Success overlay */
+  .success-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(10,10,30,0.55);
+    z-index: 999;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+  }
+  .success-overlay.show { display: flex; }
+
+  .success-box {
+    background: var(--surface);
+    border-radius: 20px;
+    padding: 40px 36px;
+    max-width: 440px;
+    width: 100%;
+    text-align: center;
+    animation: popIn 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+  }
+  @keyframes popIn {
+    from { opacity: 0; transform: scale(0.85); }
+    to { opacity: 1; transform: scale(1); }
+  }
+  .success-icon {
+    width: 56px; height: 56px;
+    background: #e9faf1;
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    margin: 0 auto 18px;
+    font-size: 26px;
+  }
+  .success-box h2 {
+    font-family: 'DM Serif Display', serif;
+    font-size: 24px;
+    color: var(--ink);
+    margin-bottom: 10px;
+  }
+  .success-box p {
+    font-size: 14px;
+    color: var(--ink-muted);
+    line-height: 1.7;
+    margin-bottom: 24px;
+  }
+  .success-ref {
+    background: var(--surface-2);
+    border-radius: 8px;
+    padding: 10px 16px;
+    font-size: 13px;
+    color: var(--ink-muted);
+    margin-bottom: 22px;
+  }
+  .success-ref strong { color: var(--accent); font-size: 15px; }
+  .close-btn {
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: var(--radius);
+    font-family: 'Noto Sans TC', sans-serif;
+    font-size: 14px;
+    font-weight: 600;
+    padding: 11px 28px;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  .close-btn:hover { background: #3a30a0; }
+
+  .field-hint {
+    font-size: 11.5px;
+    color: var(--ink-light);
+    line-height: 1.5;
+  }
+
+  @media (max-width: 540px) {
+    .grid-2, .grid-3 { grid-template-columns: 1fr; }
+    .col-full { grid-column: 1; }
+    .card { padding: 20px 16px; }
+    .items-header { display: none; }
+    .item-row { grid-template-columns: 1fr 1fr; grid-template-rows: auto auto; }
+    .item-row .material-name { grid-column: 1 / -1; }
+    .remove-btn { justify-self: end; }
+    .urgency-group { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<div class="page">
+
+  <div class="header">
+    <div class="badge">紙川有限公司</div>
+    <h1>材料申請單</h1>
+    <p>請填寫以下資料，負責人員將於收到申請後安排發放。</p>
+  </div>
+
+  <form id="mainForm" onsubmit="handleSubmit(event)" novalidate>
+
+    <!-- 申請人資訊 -->
+    <div class="card">
+      <div class="section-title">申請人資訊</div>
+      <div class="grid-2">
+        <div class="field">
+          <label>姓名 <span class="req">*</span></label>
+          <input type="text" id="name" placeholder="請輸入您的姓名" required>
+        </div>
+        <div class="field">
+          <label>部門 <span class="req">*</span></label>
+          <select id="dept" required>
+            <option value="">請選擇部門</option>
+            <option>行政部</option>
+            <option>業務部</option>
+            <option>工程部</option>
+            <option>倉儲部</option>
+            <option>品管部</option>
+            <option>其他</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>申請日期 <span class="req">*</span></label>
+          <input type="date" id="applyDate" required>
+        </div>
+        <div class="field">
+          <label>期望取貨日期</label>
+          <input type="date" id="needDate">
+          <span class="field-hint">如有急用請在緊急程度選擇「緊急」</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- 申請材料 -->
+    <div class="card">
+      <div class="section-title">申請材料明細</div>
+
+      <div class="items-header">
+        <span>材料名稱</span>
+        <span>規格／備註</span>
+        <span>數量</span>
+        <span></span>
+      </div>
+
+      <div id="itemsContainer">
+        <!-- rows injected here -->
+      </div>
+
+      <button type="button" class="add-row-btn" onclick="addRow()">
+        <span class="icon">+</span> 新增材料
+      </button>
+    </div>
+
+    <!-- 緊急程度 & 用途 -->
+    <div class="card">
+      <div class="section-title">緊急程度與用途</div>
+      <div class="grid-2">
+        <div class="field col-full">
+          <label>緊急程度 <span class="req">*</span></label>
+          <div class="urgency-group">
+            <span>
+              <input type="radio" class="urgency-option" name="urgency" id="u1" value="一般" required>
+              <label for="u1" class="urgency-label u-low"><span class="dot"></span>一般<br><span style="font-weight:400;font-size:11px;color:inherit">3–5 個工作天</span></label>
+            </span>
+            <span>
+              <input type="radio" class="urgency-option" name="urgency" id="u2" value="稍急">
+              <label for="u2" class="urgency-label u-med"><span class="dot"></span>稍急<br><span style="font-weight:400;font-size:11px;color:inherit">1–2 個工作天</span></label>
+            </span>
+            <span>
+              <input type="radio" class="urgency-option" name="urgency" id="u3" value="緊急">
+              <label for="u3" class="urgency-label u-high"><span class="dot"></span>緊急<br><span style="font-weight:400;font-size:11px;color:inherit">當天或隔天</span></label>
+            </span>
+          </div>
+        </div>
+        <div class="field col-full">
+          <label>用途說明</label>
+          <textarea id="usage" placeholder="請簡述這批材料的使用目的（選填）"></textarea>
+        </div>
+      </div>
+    </div>
+
+    <!-- 備注 -->
+    <div class="card">
+      <div class="section-title">其他備注</div>
+      <div class="field">
+        <textarea id="remarks" placeholder="任何特殊需求或補充說明（選填）" style="min-height:70px;"></textarea>
+      </div>
+      <div class="info-strip" style="margin-top:16px;">
+        <span class="i">ℹ</span>
+        <span>申請送出後，系統將自動記錄至 Google Sheet，負責人員將依序處理並聯繫您領取材料。領取時請出示此申請單號並完成簽收。</span>
+      </div>
+    </div>
+
+    <!-- 送出 -->
+    <div class="card">
+      <div class="submit-area">
+        <button type="submit" class="submit-btn">送出申請</button>
+        <p class="notice">提交即表示您確認以上資料正確無誤。<br>如需修改請聯繫紙川有限公司負責人員。</p>
+      </div>
+    </div>
+
+  </form>
+</div>
+
+<!-- Success Modal -->
+<div class="success-overlay" id="successOverlay">
+  <div class="success-box">
+    <div class="success-icon">✓</div>
+    <h2>申請已送出！</h2>
+    <p>您的材料申請已成功記錄。<br>負責人員將盡快安排處理並與您聯繫。</p>
+    <div class="success-ref">
+      申請單號：<strong id="refNum">—</strong>
+    </div>
+    <button class="close-btn" onclick="resetForm()">確認，完成</button>
+  </div>
+</div>
+
+<script>
+  const MATERIALS = [
+    '熱熔槍', '熱熔膠條', '釘書機', '釘書針', '美工刀', '美工刀片',
+    '膠帶', '雙面膠', '泡棉膠', '剪刀', '尺', '白板筆', '奇異筆',
+    '原子筆', '鉛筆', '修正帶', '便利貼', 'A4 影印紙', '資料夾',
+    '檔案盒', '迴紋針', '長尾夾', '打孔機', '其他'
+  ];
+
+  function buildOptions() {
+    return '<option value="">選擇材料</option>' +
+      MATERIALS.map(m => `<option value="${m}">${m}</option>`).join('');
+  }
+
+  let rowCount = 0;
+  function addRow() {
+    rowCount++;
+    const id = rowCount;
+    const div = document.createElement('div');
+    div.className = 'item-row';
+    div.id = `row-${id}`;
+    div.innerHTML = `
+      <div class="field material-name">
+        <select class="mat-name" required>
+          ${buildOptions()}
+        </select>
+      </div>
+      <div class="field">
+        <input type="text" class="mat-spec" placeholder="規格（選填）">
+      </div>
+      <div class="field">
+        <input type="number" class="mat-qty" placeholder="數量" min="1" required>
+      </div>
+      <button type="button" class="remove-btn" onclick="removeRow(${id})" title="移除">×</button>
+    `;
+    document.getElementById('itemsContainer').appendChild(div);
+  }
+
+  function removeRow(id) {
+    const el = document.getElementById(`row-${id}`);
+    if (el) el.remove();
+  }
+
+  function today() {
+    return new Date().toISOString().split('T')[0];
+  }
+
+  function genRef() {
+    const d = new Date();
+    const ymd = `${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}`;
+    const rnd = Math.floor(Math.random() * 9000) + 1000;
+    return `REQ-${ymd}-${rnd}`;
+  }
+
+  function handleSubmit(e) {
+    e.preventDefault();
+    const name = document.getElementById('name').value.trim();
+    const dept = document.getElementById('dept').value;
+    const applyDate = document.getElementById('applyDate').value;
+    const urgency = document.querySelector('input[name="urgency"]:checked');
+
+    const rows = document.querySelectorAll('.item-row');
+    if (rows.length === 0) { alert('請至少新增一項申請材料。'); return; }
+
+    let valid = true;
+    rows.forEach(row => {
+      const name = row.querySelector('.mat-name').value;
+      const qty = row.querySelector('.mat-qty').value;
+      if (!name || !qty || parseInt(qty) < 1) valid = false;
+    });
+
+    if (!name || !dept || !applyDate || !urgency || !valid) {
+      alert('請填寫所有必填欄位（標有 * 號）並確認材料明細完整。');
+      return;
+    }
+
+    const ref = genRef();
+    document.getElementById('refNum').textContent = ref;
+    document.getElementById('successOverlay').classList.add('show');
+  }
+
+  function resetForm() {
+    document.getElementById('successOverlay').classList.remove('show');
+    document.getElementById('mainForm').reset();
+    document.getElementById('itemsContainer').innerHTML = '';
+    rowCount = 0;
+    addRow();
+    document.getElementById('applyDate').value = today();
+  }
+
+  // Init
+  document.getElementById('applyDate').value = today();
+  addRow();
+</script>
+
+</body>
+</html>
