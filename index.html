@@ -20,7 +20,6 @@
     --accent-mid: #7068c4;
     --border: #d8d8e8;
     --danger: #c0392b;
-    --success: #1a7a4a;
     --radius: 10px;
   }
 
@@ -147,22 +146,14 @@
     width: 100%;
     text-align: center;
   }
-  .login-box .lock-icon {
-    font-size: 36px;
-    margin-bottom: 16px;
-  }
+  .login-box .lock-icon { font-size: 36px; margin-bottom: 16px; }
   .login-box h2 {
     font-family: 'DM Serif Display', serif;
     font-size: 26px;
     color: var(--ink);
     margin-bottom: 6px;
   }
-  .login-box p {
-    font-size: 13px;
-    color: var(--ink-muted);
-    margin-bottom: 24px;
-    line-height: 1.6;
-  }
+  .login-box p { font-size: 13px; color: var(--ink-muted); margin-bottom: 24px; line-height: 1.6; }
   .login-field { text-align: left; margin-bottom: 16px; }
   .login-field label { display: block; margin-bottom: 6px; }
   .login-btn {
@@ -180,12 +171,8 @@
     margin-top: 4px;
   }
   .login-btn:hover { background: #3a30a0; }
-  .login-error {
-    font-size: 13px;
-    color: var(--danger);
-    margin-top: 12px;
-    min-height: 20px;
-  }
+  .login-btn:disabled { background: var(--ink-light); cursor: not-allowed; }
+  .login-error { font-size: 13px; color: var(--danger); margin-top: 12px; min-height: 20px; }
 
   /* ── Loading ── */
   .loading-bar {
@@ -316,7 +303,6 @@
     letter-spacing: 0.04em;
   }
   .submit-btn:hover { background: #3a30a0; transform: translateY(-1px); box-shadow: 0 6px 20px rgba(74,63,160,0.3); }
-  .submit-btn:active { transform: translateY(0); }
   .notice { font-size: 12px; color: var(--ink-light); text-align: center; line-height: 1.6; }
 
   .success-overlay {
@@ -372,12 +358,12 @@
       <input type="password" id="pwdInput" placeholder="請輸入密碼"
              onkeydown="if(event.key==='Enter') doLogin()">
     </div>
-    <button class="login-btn" onclick="doLogin()">確認進入</button>
+    <button class="login-btn" id="loginBtn" onclick="doLogin()">確認進入</button>
     <div class="login-error" id="loginError"></div>
   </div>
 </div>
 
-<!-- ══ 主表單（預設隱藏）════════════════════════════════════════ -->
+<!-- ══ 主表單 ════════════════════════════════════════════════════ -->
 <div class="page" id="mainPage" style="display:none;">
   <div class="header">
     <div class="badge">紙川有限公司</div>
@@ -389,10 +375,6 @@
 
     <div class="card">
       <div class="section-title">申請人資訊</div>
-      <div id="loadingBar" class="loading-bar">
-        <div class="spinner"></div>
-        <span>正在載入清單資料…</span>
-      </div>
       <div class="grid-2">
         <div class="field">
           <label>姓名 <span class="req">*</span></label>
@@ -488,86 +470,101 @@
   const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbyN7ESocFeZ1AO2AH7k5YLBUnf42QKdNulMgxLf0pJ1iZq79wdW2PHpg-YO94Sw-y1UoA/exec";
   // ▲▲▲ 只需要改這一行 ▲▲▲
 
-  const SHARED_PASSWORD = "timeless"; // 共用密碼
+  let currentUser = null; // { name, dept } 或 null（共用密碼）
+  let sheetData   = { people: [], materials: [] };
 
-  let sheetData = { people: [], materials: [] };
-  let currentUser = null; // 登入後的使用者資料 { name, dept } 或 null（共用密碼）
-
-  // ── JSONP 讀取清單 ─────────────────────────────────────────────
-  function loadSheetData(onDone) {
-    const cbName = '_jsonpCb_' + Date.now();
-    const timer = setTimeout(function() {
-      console.warn('清單讀取逾時');
-      cleanup(); if (onDone) onDone();
+  // ── JSONP 工具 ─────────────────────────────────────────────────
+  function jsonpCall(url, callback) {
+    const cbName = '_cb_' + Date.now();
+    const timer  = setTimeout(function() {
+      delete window[cbName];
+      const s = document.getElementById('_jsonpScript');
+      if (s) s.remove();
+      callback(null); // 逾時
     }, 10000);
 
-    function cleanup() {
+    window[cbName] = function(data) {
       clearTimeout(timer);
       delete window[cbName];
       const s = document.getElementById('_jsonpScript');
       if (s) s.remove();
-    }
-
-    window[cbName] = function(data) {
-      if (data.people)    sheetData.people    = data.people;
-      if (data.materials) sheetData.materials = data.materials;
-      cleanup();
-      if (onDone) onDone();
+      callback(data);
     };
 
     const s = document.createElement('script');
     s.id  = '_jsonpScript';
-    s.src = WEB_APP_URL + '?action=getList&callback=' + cbName;
-    s.onerror = function() { cleanup(); if (onDone) onDone(); };
+    s.src = url + '&callback=' + cbName;
+    s.onerror = function() {
+      clearTimeout(timer);
+      delete window[cbName];
+      s.remove();
+      callback(null);
+    };
     document.head.appendChild(s);
   }
 
-  // ── 密碼登入 ───────────────────────────────────────────────────
+  // ── 登入 ──────────────────────────────────────────────────────
   function doLogin() {
-    const pwd = document.getElementById('pwdInput').value.trim();
-    const errEl = document.getElementById('loginError');
+    const pwd    = document.getElementById('pwdInput').value.trim();
+    const errEl  = document.getElementById('loginError');
+    const btn    = document.getElementById('loginBtn');
     errEl.textContent = '';
 
     if (!pwd) { errEl.textContent = '請輸入密碼'; return; }
 
-    // 先比對個人密碼（需要清單已載入）
-    const matched = sheetData.people.find(function(p) {
-      return p.pwd && p.pwd === pwd;
-    });
+    btn.textContent = '驗證中…';
+    btn.disabled    = true;
 
-    if (matched) {
-      // 個人密碼正確
-      currentUser = { name: matched.name, dept: matched.dept };
+    const url = WEB_APP_URL + '?action=login&pwd=' + encodeURIComponent(pwd);
+    jsonpCall(url, function(res) {
+      btn.textContent = '確認進入';
+      btn.disabled    = false;
+
+      if (!res) {
+        errEl.textContent = '連線失敗，請稍後再試';
+        return;
+      }
+      if (!res.ok) {
+        errEl.textContent = '密碼錯誤，請再試一次';
+        document.getElementById('pwdInput').value = '';
+        document.getElementById('pwdInput').focus();
+        return;
+      }
+
+      // 登入成功
+      if (res.isShared) {
+        // 共用密碼：需自選姓名
+        currentUser = null;
+        sheetData.people    = res.people    || [];
+        sheetData.materials = res.materials || [];
+      } else {
+        // 個人密碼：自動帶入姓名部門
+        currentUser = { name: res.name, dept: res.dept };
+        sheetData.materials = res.materials || [];
+      }
+
       enterForm();
-    } else if (pwd === SHARED_PASSWORD) {
-      // 共用密碼正確
-      currentUser = null;
-      enterForm();
-    } else {
-      errEl.textContent = '密碼錯誤，請再試一次';
-      document.getElementById('pwdInput').value = '';
-      document.getElementById('pwdInput').focus();
-    }
+    });
   }
 
   // ── 進入表單 ───────────────────────────────────────────────────
   function enterForm() {
     document.getElementById('loginScreen').classList.add('hidden');
     document.getElementById('mainPage').style.display = 'block';
-    document.getElementById('loadingBar').classList.remove('hidden');
 
-    buildNameSelect();
     buildMaterialOptions();
-    document.getElementById('loadingBar').classList.add('hidden');
     addRow();
     document.getElementById('applyDate').value = today();
 
-    // 個人密碼登入：自動帶入姓名、部門，設為唯讀
     if (currentUser) {
+      // 個人密碼：姓名唯讀
       const nameEl = document.getElementById('name');
       nameEl.innerHTML = '<option value="' + currentUser.name + '">' + currentUser.name + '</option>';
-      nameEl.disabled = true;
+      nameEl.disabled  = true;
       document.getElementById('dept').value = currentUser.dept || '';
+    } else {
+      // 共用密碼：顯示姓名下拉
+      buildNameSelect();
     }
   }
 
@@ -579,7 +576,7 @@
       const opt = document.createElement('option');
       opt.value = p.name;
       opt.dataset.dept = p.dept || '';
-      opt.textContent = p.name;
+      opt.textContent  = p.name;
       sel.appendChild(opt);
     });
   }
@@ -637,12 +634,12 @@
     if (sel.value === '其他') {
       customDiv.classList.remove('hidden');
       customIn.required = true;
-      specInput.value = '';
+      specInput.value   = '';
     } else {
       customDiv.classList.add('hidden');
       customIn.required = false;
-      customIn.value = '';
-      specInput.value = opt ? (opt.dataset.spec || '') : '';
+      customIn.value    = '';
+      specInput.value   = opt ? (opt.dataset.spec || '') : '';
     }
   }
 
@@ -713,7 +710,6 @@
     rowCount = 0;
 
     if (currentUser) {
-      // 個人登入：保留姓名、部門
       document.getElementById('dept').value = currentUser.dept || '';
     } else {
       document.getElementById('dept').value = '';
@@ -725,12 +721,9 @@
     document.getElementById('applyDate').value = today();
   }
 
-  // ── 初始化：先載入清單，再顯示密碼頁 ───────────────────────
+  // ── 初始化 ────────────────────────────────────────────────────
   window._matOptions = '<option value="">選擇材料</option><option value="其他">其他</option>';
-  loadSheetData(function() {
-    // 資料載入完成，密碼頁就緒
-    document.getElementById('pwdInput').focus();
-  });
+  document.getElementById('pwdInput').focus();
 </script>
 
 </body>
